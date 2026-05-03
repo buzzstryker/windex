@@ -195,26 +195,13 @@ export default function StandingsScreen() {
   };
 
   const listHeader = (
-    <>
-      {/* Season picker button */}
-      <Pressable
-        style={styles.seasonPickerBtn}
-        onPress={() => setSeasonPickerVisible(true)}
-      >
-        <Text style={styles.seasonPickerLabel}>{currentDisplayLabel}</Text>
-        <Text style={styles.seasonPickerChevron}>{'\u25BE'}</Text>
-      </Pressable>
-
-      {/* Table column headers */}
-      {standings.length > 0 ? (
-        <View style={styles.tableHeader}>
-          <View style={styles.medalCol} />
-          <Text style={[styles.colHeaderText, { flex: 1, marginRight: 8 }]}>PLAYER</Text>
-          <Text style={[styles.colHeaderText, { width: 60, textAlign: 'center' }]}>ROUNDS</Text>
-          <Text style={[styles.colHeaderText, { width: 85, textAlign: 'right' }]}>+/-</Text>
-        </View>
-      ) : null}
-    </>
+    <Pressable
+      style={styles.seasonPickerBtn}
+      onPress={() => setSeasonPickerVisible(true)}
+    >
+      <Text style={styles.seasonPickerLabel}>{currentDisplayLabel}</Text>
+      <Text style={styles.seasonPickerChevron}>{'\u25BE'}</Text>
+    </Pressable>
   );
 
   return (
@@ -337,15 +324,8 @@ const styles = StyleSheet.create({
   errorBanner: { color: '#c62828', marginBottom: 8, fontSize: 14, paddingHorizontal: 16 },
   spinner: { marginVertical: 24 },
   empty: { textAlign: 'center', marginTop: 24, fontSize: 15 },
-  tableHeader: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E0E0E0',
-  },
-  colHeaderText: {
-    fontSize: 11, fontWeight: '700', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.5,
-  },
   row: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16,
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16,
   },
   medalCol: { width: 30, alignItems: 'center', justifyContent: 'center' },
   medalEmoji: { fontSize: 18 },
