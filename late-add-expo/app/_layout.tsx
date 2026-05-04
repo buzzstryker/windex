@@ -56,6 +56,7 @@ function RootNavigator() {
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="round/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="player/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="groups" options={{ headerShown: false }} />
         <Stack.Screen name="group/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="group-members" options={{ headerShown: false }} />

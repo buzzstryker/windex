@@ -148,8 +148,6 @@ export default function RoundDetailScreen() {
         player_id: r.player_id,
         game_points: parseFloat(editScores[r.player_id] ?? '0'),
       }));
-      // Re-ingest with same external_event_id to update (or use PATCH)
-      // For simplicity, delete old scores and re-ingest
       const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
       const token = await getStoredAccessToken();
       const anonKey = getSupabaseAnonKey();
@@ -159,9 +157,6 @@ export default function RoundDetailScreen() {
         apikey: anonKey || token || '',
         Prefer: 'return=minimal',
       };
-
-      // Delete old scores
-      await fetch(`${base}/rest/v1/league_scores?league_round_id=eq.${id}`, { method: 'DELETE', headers });
 
       // Compute new h2h values
       const N = scores.length;
@@ -174,11 +169,23 @@ export default function RoundDetailScreen() {
         score_value: N * sc.game_points - total,
       }));
 
-      await fetch(`${base}/rest/v1/league_scores`, {
+      // Delete old scores — check response
+      const delRes = await fetch(`${base}/rest/v1/league_scores?league_round_id=eq.${id}`, { method: 'DELETE', headers });
+      if (!delRes.ok) {
+        const text = await delRes.text();
+        throw new Error(`Failed to delete existing scores: ${delRes.status} ${text}`);
+      }
+
+      // Insert new scores — check response
+      const insRes = await fetch(`${base}/rest/v1/league_scores`, {
         method: 'POST',
         headers,
         body: JSON.stringify(insertRows),
       });
+      if (!insRes.ok) {
+        const text = await insRes.text();
+        throw new Error(`Failed to save new scores: ${insRes.status} ${text}`);
+      }
 
       // Reload
       const ev = await getEvent(id);
