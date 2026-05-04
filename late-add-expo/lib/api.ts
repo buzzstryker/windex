@@ -234,6 +234,9 @@ export type StandingRow = {
   player_id: string;
   player_name?: string;
   rounds_played: number;
+  wins: number;
+  losses: number;
+  ties: number;
   total_points: number;
   rank?: number;
 };
