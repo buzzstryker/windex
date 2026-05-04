@@ -16,3 +16,6 @@ Thumbs.db
 # Windows shell artifacts (repo root)
 /dir
 /nul
+.vercel
+.env*.local
+.claude/
