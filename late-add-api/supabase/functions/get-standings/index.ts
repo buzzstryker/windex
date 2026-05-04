@@ -62,7 +62,7 @@ serve(async (req) => {
 
   let query = supabase
     .from("season_standings")
-    .select("season_id, group_id, player_id, rounds_played, total_points")
+    .select("season_id, group_id, player_id, rounds_played, wins, losses, ties, total_points")
     .eq("season_id", seasonId)
     .order("total_points", { ascending: false });
 
@@ -79,7 +79,7 @@ serve(async (req) => {
     );
   }
 
-  const standings = (rows ?? []) as { season_id: string; group_id: string; player_id: string; rounds_played: number; total_points: number }[];
+  const standings = (rows ?? []) as { season_id: string; group_id: string; player_id: string; rounds_played: number; wins: number; losses: number; ties: number; total_points: number }[];
   if (standings.length === 0) {
     return new Response(JSON.stringify({ standings: [] }), {
       status: 200,
