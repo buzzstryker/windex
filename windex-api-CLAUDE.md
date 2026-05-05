@@ -1,17 +1,17 @@
-# late-add-api — CLAUDE.md
+# windex-api — CLAUDE.md
 
-Use as **late-add-api/CLAUDE.md** (template; the project already has [late-add-api/CLAUDE.md](./late-add-api/CLAUDE.md) in this directory).
+Use as **windex-api/CLAUDE.md** (template; the project already has [windex-api/CLAUDE.md](./windex-api/CLAUDE.md) in this directory).
 
 ---
 
 ## Project
 
-late-add-api is the backend/API for Windex (a standalone app, separate from Scorekeeper). Groups, seasons, league rounds, and scores. Supabase (Postgres, Auth, Edge Functions). Consumed by the Windex app and by any other source apps that call the API; types shared with shared-golf-types where possible.
+windex-api is the backend/API for Windex (a standalone app, separate from Scorekeeper). Groups, seasons, league rounds, and scores. Supabase (Postgres, Auth, Edge Functions). Consumed by the Windex app and by any other source apps that call the API; types shared with shared-golf-types where possible.
 
 ## Repo structure
 
 ```
-late-add-api/
+windex-api/
 ├── docs/
 ├── supabase/
 │   ├── migrations/
@@ -41,4 +41,4 @@ late-add-api/
 
 ## References
 
-- API and schema: see **late-add-api/docs/** in this directory and the root-level bootstrap, data model, and API spec.
+- API and schema: see **windex-api/docs/** in this directory and the root-level bootstrap, data model, and API spec.

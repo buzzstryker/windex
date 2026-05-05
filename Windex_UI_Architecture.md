@@ -1,6 +1,6 @@
 # Windex — UI Architecture
 
-Front-end structure for the Windex admin UI. For screens and flows see [Screen Map](./Windex_Screen_Map.md); for API contract see [API Spec](./Windex_API_Spec.md) and [late-add-api/docs/](./late-add-api/docs/).
+Front-end structure for the Windex admin UI. For screens and flows see [Screen Map](./Windex_Screen_Map.md); for API contract see [API Spec](./Windex_API_Spec.md) and [windex-api/docs/](./windex-api/docs/).
 
 ---
 
@@ -55,7 +55,7 @@ Main UI areas (aligned with [Screen Map](./Windex_Screen_Map.md)):
 
 Auth (sign-in) is a separate flow (e.g. `/login`) before the above.
 
-### Expo app (late-add-expo) — 3-tab structure
+### Expo app (windex-expo) — 3-tab structure
 
 | Tab / Route | Purpose |
 |-------------|---------|
@@ -87,10 +87,10 @@ Visual design matches Late Add v1 (Glide): olive green headers (#4B5E2A), white 
 | **Update / override round** | Use backend-supported update endpoint(s) for event metadata and/or results; document any override/reason field if present. |
 | **Retrieve standings** | GET standings by group/season; display as returned; no client-side aggregation. |
 | **Retrieve groups, seasons, events** | GET list/detail for groups, seasons, league_rounds (events); use for lists, detail views, filters. |
-| **Resolve attribution** | Use API endpoints for attribution resolution (accept/reject/merge) per late-add-api contract. |
+| **Resolve attribution** | Use API endpoints for attribution resolution (accept/reject/merge) per windex-api contract. |
 | **Resolve player mappings** | Map external player identifiers to Windex player_id via supported API; refresh queues after resolution. |
 
-All calls use **Bearer JWT** (Supabase Auth). Full contract in [late-add-api/docs/](./late-add-api/docs/).
+All calls use **Bearer JWT** (Supabase Auth). Full contract in [windex-api/docs/](./windex-api/docs/).
 
 ---
 

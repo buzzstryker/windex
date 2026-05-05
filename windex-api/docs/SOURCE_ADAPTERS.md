@@ -10,7 +10,7 @@ Source adapters convert **external point totals** (from Scorekeeper, 18Birdies, 
 - **Output:** Request body for `POST /ingest-event-results` (group_id, season_id, round_date, source_app, external_event_id, scores[]).
 - **Responsibility:** Map event id, round date, players, and point totals into the API shape. Map source identity (external id or name) to `source_player_ref` and/or `source_player_name` so the API can resolve or enqueue identities.
 
-Adapters live in `late-add-api/adapters/`. The ingest API remains the single entry point; adapters are a thin normalization layer used by scripts, cron jobs, or tests before calling the API.
+Adapters live in `windex-api/adapters/`. The ingest API remains the single entry point; adapters are a thin normalization layer used by scripts, cron jobs, or tests before calling the API.
 
 ---
 
@@ -115,7 +115,7 @@ To import a **Glide app export** (`.ods` from Glide) into Windex (all Glide fiel
 
 1. **Optional but recommended:** Sync structure so sections, groups, and seasons exist with the same IDs as in Glide:
    ```bash
-   cd late-add-api
+   cd windex-api
    npm install
    npm run glide:sync-structure -- "path/to/YourExport.ods"
    ```

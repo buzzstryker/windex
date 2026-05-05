@@ -532,7 +532,7 @@ Requires `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` from the Supabase D
 
 **GET** `/get-points-analysis`
 
-Head-to-head point comparison between two players. All computation is server-side. Consumed by both late-add-admin and late-add-expo.
+Head-to-head point comparison between two players. All computation is server-side. Consumed by both windex-admin and windex-expo.
 
 **Query params**
 
@@ -603,7 +603,7 @@ Head-to-head point comparison between two players. All computation is server-sid
 
 **GET** `/get-points-matrix`
 
-All-vs-all game points differential matrix for a group. All computation is server-side. Consumed by both late-add-admin and late-add-expo.
+All-vs-all game points differential matrix for a group. All computation is server-side. Consumed by both windex-admin and windex-expo.
 
 **Query params**
 

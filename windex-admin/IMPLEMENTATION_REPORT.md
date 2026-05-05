@@ -50,7 +50,7 @@ Additional: **Login** (`/login`), **Groups** (`/groups`), **Group Detail** (`/gr
 | **DataTable** | Generic table: columns (key, label, optional render), getRowKey, optional onRowClick, optional selectedRowKey for row highlight (queue screens). |
 | **FilterBar** | Wrapper for filter controls. |
 | **EmptyState** | Message + optional detail (e.g. when items would appear) + optional action. |
-| **ErrorState** | Message + optional Retry. 404 from API shows "Endpoint not implemented (404): <path>. Add in late-add-api or use PostgREST." |
+| **ErrorState** | Message + optional Retry. 404 from API shows "Endpoint not implemented (404): <path>. Add in windex-api or use PostgREST." |
 | **LoadingSpinner** | Centered spinner. |
 | **ConfirmToast** | Temporary success toast. |
 | **FormSection** | Optional title + children for forms. |
@@ -61,14 +61,14 @@ Additional: **Login** (`/login`), **Groups** (`/groups`), **Group Detail** (`/gr
 
 | Endpoint | Used by | Backend status |
 |----------|---------|----------------|
-| **POST /ingest-event-results** | Round Entry | Implemented (late-add-api Edge Function). |
+| **POST /ingest-event-results** | Round Entry | Implemented (windex-api Edge Function). |
 | **GET /get-standings?season_id=&group_id=** | Standings | Implemented; response includes `player_name` when present. |
 | **GET /standings-player-history?group_id=&season_id=&player_id=** | Standings drilldown | Implemented (Edge Function `standings-player-history`). Read-only round-level point history for one player in group/season. |
-| **GET /groups** | Events filter, Round Entry, Standings, Groups | Implemented (late-add-api Edge Function `groups`). |
-| **GET /seasons?group_id=** | Round Entry, Standings, Group Detail | Implemented (late-add-api Edge Function `seasons`). |
-| **GET /events** (with query params) | Dashboard, Events | Implemented (late-add-api Edge Function `events`). |
+| **GET /groups** | Events filter, Round Entry, Standings, Groups | Implemented (windex-api Edge Function `groups`). |
+| **GET /seasons?group_id=** | Round Entry, Standings, Group Detail | Implemented (windex-api Edge Function `seasons`). |
+| **GET /events** (with query params) | Dashboard, Events | Implemented (windex-api Edge Function `events`). |
 | **GET /events/:eventId** | Event Detail, Round Edit | Implemented; `player_name` populated from canonical `players` when present. |
-| **PATCH /events/:eventId** | Round Edit | Implemented (late-add-api Edge Function `events`). |
+| **PATCH /events/:eventId** | Round Edit | Implemented (windex-api Edge Function `events`). |
 | **GET /players?group_id=** | Round entry player picker, player mapping | Implemented (Edge Function `players`). Optional `group_id` restricts to active group members. |
 | **GET /review/attribution** | Dashboard, Attribution Review | Implemented (Edge Function `review`). Returns rounds with `attribution_status = pending_attribution`. |
 | **POST /review/attribution/:id/resolve** | Attribution Review | Implemented. Body: `{ "group_id", "season_id"? }`; updates round and sets `attribution_status = attribution_resolved`. |
@@ -84,7 +84,7 @@ Additional: **Login** (`/login`), **Groups** (`/groups`), **Group Detail** (`/gr
 
 None. All UI-used endpoints are implemented.
 
-**Implemented (late-add-api):** GET /groups, GET /seasons, GET /events, GET /events/:eventId, PATCH /events/:eventId, GET /players, get-standings with player_name, GET /review/player-mapping, POST /review/player-mapping/:id/resolve, **GET /review/attribution**, **POST /review/attribution/:id/resolve**. See `late-add-api/docs/api.md` and `late-add-api/docs/admin-ui-endpoints.md`.
+**Implemented (windex-api):** GET /groups, GET /seasons, GET /events, GET /events/:eventId, PATCH /events/:eventId, GET /players, get-standings with player_name, GET /review/player-mapping, POST /review/player-mapping/:id/resolve, **GET /review/attribution**, **POST /review/attribution/:id/resolve**. See `windex-api/docs/api.md` and `windex-api/docs/admin-ui-endpoints.md`.
 
 ---
 
@@ -126,4 +126,4 @@ A structured review of operator workflows (manual round entry, event detail, rou
 
 **Deferred (larger UX):** Player mapping filter players by group; events list column visibility/reorder; round entry inline validation; dashboard quick filters; breadcrumbs; keyboard/a11y pass. **Override audit:** Full revision history (multiple edits per score) is out of scope; current scope is single override_reason/override_actor/override_at per score, surfaced in Event Detail, Round Edit, and Standings drilldown.
 
-**Standings drilldown:** Backend GET `/standings-player-history?group_id=&season_id=&player_id=` returns round-level point records for one player (ledger drilldown). Standings screen: click a player row → detail panel with total, rounds played, and table of (date, event link, points, override when present, source). Override shown in orange with “(override)” label. Empty state when no history. See late-add-api/docs/api.md and POINTS_LEDGER_ARCHITECTURE.md. **Deferred enhancements:** Export history to CSV; filter history by date range (backend could support optional from_date/to_date).
+**Standings drilldown:** Backend GET `/standings-player-history?group_id=&season_id=&player_id=` returns round-level point records for one player (ledger drilldown). Standings screen: click a player row → detail panel with total, rounds played, and table of (date, event link, points, override when present, source). Override shown in orange with “(override)” label. Empty state when no history. See windex-api/docs/api.md and POINTS_LEDGER_ARCHITECTURE.md. **Deferred enhancements:** Export history to CSV; filter history by date range (backend could support optional from_date/to_date).

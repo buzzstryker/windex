@@ -1,11 +1,11 @@
-# late-add-api — Structure
+# windex-api — Structure
 
-Backend/API for Windex. Lives in **`late-add-api/`** in this directory. Product overview: [README.md](./README.md). Setup and run: [late-add-api/README.md](./late-add-api/README.md).
+Backend/API for Windex. Lives in **`windex-api/`** in this directory. Product overview: [README.md](./README.md). Setup and run: [windex-api/README.md](./windex-api/README.md).
 
 **Structure:**
 
 ```
-late-add-api/
+windex-api/
 ├── docs/                    # API contract, payout/settlement design
 ├── supabase/
 │   ├── migrations/          # Schema and RLS
@@ -20,4 +20,4 @@ late-add-api/
 - **supabase/migrations/** — Timestamped SQL; tables, indexes, RLS.
 - **supabase/functions/** — One folder per Edge Function.
 - **README.md** — Setup, run, deploy, testing (in that folder).
-- **CLAUDE.md** — Project rules for AI/editor. Template at root: [late-add-api-CLAUDE.md](./late-add-api-CLAUDE.md).
+- **CLAUDE.md** — Project rules for AI/editor. Template at root: [windex-api-CLAUDE.md](./windex-api-CLAUDE.md).

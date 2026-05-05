@@ -1,13 +1,13 @@
-# late-add-api repo bootstrap plan
+# windex-api repo bootstrap plan
 
-Based on this Windex directory (Windex is a separate app from Scorekeeper). The **late-add-api** code and Supabase backend live in **`late-add-api/`** in this directory.
+Based on this Windex directory (Windex is a separate app from Scorekeeper). The **windex-api** code and Supabase backend live in **`windex-api/`** in this directory.
 
 ---
 
 ## 1. Recommended folder structure
 
 ```
-late-add-api/
+windex-api/
 ├── supabase/
 │   ├── migrations/          # timestamped SQL migrations (see below)
 │   └── functions/           # Edge Functions (see first endpoints)
@@ -187,22 +187,22 @@ Implementation notes:
 
 ## 5. What should move later into shared-golf-types
 
-Move these out of **late-add-api** into **shared-golf-types** (e.g. `src/late-add/` and `src/scorekeeper/`) so both the app and API consume the same definitions:
+Move these out of **windex-api** into **shared-golf-types** (e.g. `src/late-add/` and `src/scorekeeper/`) so both the app and API consume the same definitions:
 
 - **Windex / league:** `Section`, `Group`, `GroupMember`, `Season`, `LeagueRound`, `LeagueScore` (and create/update DTOs).
 - **Enums:** Group member role (`member` | `admin`), round type, handicap mode, league round `scores_override` flag.
 - **Other golf apps (for sync/compat):** Minimal `Player` (id, name, handicap_index, ghin_number), `Course`, `Round`, `Score` — at least the fields a source app or sync layer might use.
 
-Start with types in **late-add-api** `src/types/`; once shared-golf-types exists, re-export from the package and delete local duplicates.
+Start with types in **windex-api** `src/types/`; once shared-golf-types exists, re-export from the package and delete local duplicates.
 
 ---
 
-## 6. Minimal README for late-add-api
+## 6. Minimal README for windex-api
 
-Use this as the initial **README.md** in the late-add-api repo:
+Use this as the initial **README.md** in the windex-api repo:
 
 ```markdown
-# late-add-api
+# windex-api
 
 API for Late Add Golf: groups, seasons, league rounds, and scores. Backed by Supabase (Postgres + Auth + Edge Functions).
 
@@ -216,7 +216,7 @@ API for Late Add Golf: groups, seasons, league rounds, and scores. Backed by Sup
 
 1. Clone and install:
    ```bash
-   git clone <repo-url> late-add-api && cd late-add-api
+   git clone <repo-url> windex-api && cd windex-api
    npm install
    ```
 

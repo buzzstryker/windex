@@ -2,7 +2,7 @@
  * Generate a seed-bundle JSON from the Glide ODS export.
  *
  * Reads the ODS at ../glide-export/610470.Late Add Golf.ods and writes
- * ../late-add-admin/src/data/glide-seed.json with sections, groups, seasons,
+ * ../windex-admin/src/data/glide-seed.json with sections, groups, seasons,
  * players, group_members, player_mappings, and rounds (ingest payloads).
  *
  * Usage: node scripts/generate-seed-bundle.mjs
@@ -19,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
 const ODS_PATH = join(ROOT, '..', 'glide-export', '610470.Late Add Golf.ods');
-const OUT_DIR = join(ROOT, '..', 'late-add-admin', 'src', 'data');
+const OUT_DIR = join(ROOT, '..', 'windex-admin', 'src', 'data');
 const OUT_PATH = join(OUT_DIR, 'glide-seed.json');
 
 const SOURCE_APP = 'glide';

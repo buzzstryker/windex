@@ -1,11 +1,11 @@
-# late-add-api
+# windex-api
 
 Backend/API for Late Add Golf: groups, seasons, league rounds, scores, standings. Supabase (Postgres, Auth, Edge Functions). Consumed by scorekeeper-app; types shared with shared-golf-types where possible.
 
 ## Repo structure
 
 ```
-late-add-api/
+windex-api/
 ├── docs/
 ├── supabase/
 │   ├── migrations/

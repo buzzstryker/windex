@@ -1,6 +1,6 @@
 # Windex — API Spec
 
-Endpoints, request/response shapes, auth, and errors for late-add-api. Full contract, validation rules, and error codes: [late-add-api/docs/api.md](./late-add-api/docs/api.md). For terms (Group, Season, Event, Result, Standings, Source app, Attribution) see [README — Terminology](./README.md#terminology).
+Endpoints, request/response shapes, auth, and errors for windex-api. Full contract, validation rules, and error codes: [windex-api/docs/api.md](./windex-api/docs/api.md). For terms (Group, Season, Event, Result, Standings, Source app, Attribution) see [README — Terminology](./README.md#terminology).
 
 ---
 
@@ -17,10 +17,10 @@ Endpoints, request/response shapes, auth, and errors for late-add-api. Full cont
 | GET | `/get-standings` | Read season standings. Query: `season_id`, optional `group_id`. Returns points-only (rounds_played, total_points). |
 | POST | `/compute-money-deltas` | Round-scoped: compute and write `league_scores.money_delta` for one round from group payout config (`groups.dollars_per_point`). Body: `league_round_id`. No-op if config not set. |
 | POST | `/generate-payment-requests` | Round-scoped: read `money_delta` for one round, return minimal payer→payee requests (amount_cents). Body: `league_round_id`. Does not persist. **Note:** This endpoint implements the "Quick Payout" (minimized transactions) algorithm only. The "Full Payout" (every loser→winner) is computed client-side in the Expo app using `score_value × dollars_per_point`. |
-| GET | `/get-points-analysis` | Head-to-head point comparison between two players. Query: `group_id`, `player_a_id`, `player_b_id`, optional `season_id`. Returns lifetime + per-season breakdown with per-round detail. Consumed by both late-add-admin and late-add-expo. |
-| GET | `/get-points-matrix` | All-vs-all game points differential matrix for a group. Query: `group_id`, optional `season_id`, `exclude_signature_events` (default true). Returns player list, pairwise cells (net + rounds), and top 10 worst matchups. Consumed by both late-add-admin and late-add-expo. |
+| GET | `/get-points-analysis` | Head-to-head point comparison between two players. Query: `group_id`, `player_a_id`, `player_b_id`, optional `season_id`. Returns lifetime + per-season breakdown with per-round detail. Consumed by both windex-admin and windex-expo. |
+| GET | `/get-points-matrix` | All-vs-all game points differential matrix for a group. Query: `group_id`, optional `season_id`, `exclude_signature_events` (default true). Returns player list, pairwise cells (net + rounds), and top 10 worst matchups. Consumed by both windex-admin and windex-expo. |
 
-Details (request/response shapes, validation, error codes): see **late-add-api/** in this directory: [docs/api.md](./late-add-api/docs/api.md), [payout-configuration-design.md](./late-add-api/docs/payout-configuration-design.md), [settlement-calculation-design.md](./late-add-api/docs/settlement-calculation-design.md).
+Details (request/response shapes, validation, error codes): see **windex-api/** in this directory: [docs/api.md](./windex-api/docs/api.md), [payout-configuration-design.md](./windex-api/docs/payout-configuration-design.md), [settlement-calculation-design.md](./windex-api/docs/settlement-calculation-design.md).
 
 ## Types (request / response)
 
@@ -30,11 +30,11 @@ Details (request/response shapes, validation, error codes): see **late-add-api/*
 - Points analysis (head-to-head): `{ player_a, player_b, lifetime: { rounds_together, net_points, player_a_wins, player_b_wins, ties }, by_season: [ { season_name, rounds_together, net_points, rounds: [ { round_date, player_a_points, player_b_points, net } ] } ] }`.
 - Points matrix (all-vs-all): `{ players: [ { id, display_name } ], cells: { [a]: { [b]: { net, rounds } } }, matchups: [ { player_a, player_b, net, rounds, avg_per_round } ] }`.
 
-All points analysis and matrix computation is **server-side** in Edge Functions. Both late-add-admin and late-add-expo call the same endpoints and render the response without client-side computation.
+All points analysis and matrix computation is **server-side** in Edge Functions. Both windex-admin and windex-expo call the same endpoints and render the response without client-side computation.
 
 ## References
 
 - [Master Spec](./Windex_Master_Spec.md)
 - [Data Model](./Windex_Data_Model.md)
-- [bootstrap-late-add-api.md](./bootstrap-late-add-api.md) (first endpoints)
-- [late-add-api/docs/](./late-add-api/docs/) — full API contract, settlement and payout design, backlog
+- [bootstrap-windex-api.md](./bootstrap-windex-api.md) (first endpoints)
+- [windex-api/docs/](./windex-api/docs/) — full API contract, settlement and payout design, backlog

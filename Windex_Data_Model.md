@@ -1,6 +1,6 @@
 # Windex — Data Model
 
-Entities and schema summary. Implemented in **late-add-api/** (Supabase/Postgres). Full schema lives in that repo’s migrations. For standard terms (**Group**, **Season**, **Event**, **Result**, **Standings**, **Source app**, **Attribution**) see [README — Terminology](./README.md#terminology).
+Entities and schema summary. Implemented in **windex-api/** (Supabase/Postgres). Full schema lives in that repo’s migrations. For standard terms (**Group**, **Season**, **Event**, **Result**, **Standings**, **Source app**, **Attribution**) see [README — Terminology](./README.md#terminology).
 
 ---
 
@@ -25,7 +25,7 @@ Entities and schema summary. Implemented in **late-add-api/** (Supabase/Postgres
 
 ## Schema (physical)
 
-Implemented in **late-add-api/** in this directory: `sections`, `groups`, `group_members`, `seasons`, `league_rounds`, `league_scores`; `season_standings` view; RLS on all tables. See [late-add-api/supabase/migrations/](./late-add-api/supabase/migrations/) and [late-add-api/docs/api.md](./late-add-api/docs/api.md) for column-level detail.
+Implemented in **windex-api/** in this directory: `sections`, `groups`, `group_members`, `seasons`, `league_rounds`, `league_scores`; `season_standings` view; RLS on all tables. See [windex-api/supabase/migrations/](./windex-api/supabase/migrations/) and [windex-api/docs/api.md](./windex-api/docs/api.md) for column-level detail.
 
 ## Sync and ownership
 
@@ -36,5 +36,5 @@ Implemented in **late-add-api/** in this directory: `sections`, `groups`, `group
 
 - [README.md](./README.md)
 - [API Spec](./Windex_API_Spec.md)
-- [bootstrap-late-add-api.md](./bootstrap-late-add-api.md)
-- [late-add-api/](./late-add-api/): migrations, [docs/api.md](./late-add-api/docs/api.md)
+- [bootstrap-windex-api.md](./bootstrap-windex-api.md)
+- [windex-api/](./windex-api/): migrations, [docs/api.md](./windex-api/docs/api.md)

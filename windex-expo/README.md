@@ -1,11 +1,11 @@
-# late-add-expo
+# windex-expo
 
 Expo app for Late Add Golf v2 — web (Vercel), iOS, and Android via Expo Go.
 
 ## Web deployment
 
 - **Production:** https://app.lateaddgolf.com (Vercel, auto-deploys from `master`)
-- **Vercel root directory:** `late-add-expo/`
+- **Vercel root directory:** `windex-expo/`
 - **Build:** `npx expo export --platform web` → outputs to `dist/`
 
 ## Authentication
@@ -19,7 +19,7 @@ Login uses **email OTP** (6-digit code):
 
 **Email/password** fallback is available behind a "Sign in with password instead" toggle (used for dev accounts).
 
-Only existing users can log in (`shouldCreateUser: false`). Player accounts are created by an admin via `late-add-api/scripts/invite-players.mjs`.
+Only existing users can log in (`shouldCreateUser: false`). Player accounts are created by an admin via `windex-api/scripts/invite-players.mjs`.
 
 ### Auth architecture
 
@@ -43,7 +43,7 @@ For Vercel, set these in the Vercel dashboard under Settings > Environment Varia
 ## Development
 
 ```bash
-cd late-add-expo
+cd windex-expo
 npm install
 npx expo start        # dev server (web + mobile)
 npx expo start --web  # web only
@@ -80,12 +80,12 @@ To get the app icon on iPhone: Safari > Share > Add to Home Screen.
 - **Email template:** Custom OTP-only template (shows code, no magic link)
 
 ### Edge Functions
-All Edge Functions are deployed with `--no-verify-jwt`. Functions handle auth internally via `getUser(token)`. See `late-add-api/supabase/config.toml` for the full list.
+All Edge Functions are deployed with `--no-verify-jwt`. Functions handle auth internally via `getUser(token)`. See `windex-api/supabase/config.toml` for the full list.
 
 ## Project structure
 
 ```
-late-add-expo/
+windex-expo/
 ├── app/              # Expo Router screens (file-based routing)
 │   ├── (tabs)/       # Tab screens: standings, rounds, history, etc.
 │   ├── login.tsx     # OTP + password login

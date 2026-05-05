@@ -34,11 +34,11 @@ async function main() {
     console.error("");
     console.error("Missing SUPABASE_ANON_KEY or SUPABASE_SERVICE_ROLE_KEY.");
     console.error("");
-    console.error("1. From the late-add-api folder, run:  supabase start");
+    console.error("1. From the windex-api folder, run:  supabase start");
     console.error("2. In the output, copy the values for:");
     console.error("   - anon key");
     console.error("   - service_role key");
-    console.error("3. Create a file named .env in the late-add-api folder with (one per line, no line breaks inside a value):");
+    console.error("3. Create a file named .env in the windex-api folder with (one per line, no line breaks inside a value):");
     console.error("   SUPABASE_URL=http://127.0.0.1:54321");
     console.error("   SUPABASE_ANON_KEY=<paste anon key here>");
     console.error("   SUPABASE_SERVICE_ROLE_KEY=<paste service_role key here>");

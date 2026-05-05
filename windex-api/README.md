@@ -1,4 +1,4 @@
-# late-add-api
+# windex-api
 
 API for Late Add Golf v2: points-ingestion and standings. Groups, seasons, league rounds, scores, and standings. Windex does not compute golf competition formats; it accepts final point totals and stores/aggregates them. Backed by Supabase (Postgres, Auth, Edge Functions).
 
@@ -13,7 +13,7 @@ API for Late Add Golf v2: points-ingestion and standings. Groups, seasons, leagu
 1. From the Windex directory, go into the API folder and install:
 
    ```bash
-   cd late-add-api
+   cd windex-api
    npm install
    ```
 

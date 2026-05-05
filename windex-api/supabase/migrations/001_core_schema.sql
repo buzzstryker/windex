@@ -1,4 +1,4 @@
--- late-add-api: core schema, RLS, standings view
+-- windex-api: core schema, RLS, standings view
 -- Requires auth.users (Supabase default)
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";

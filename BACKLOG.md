@@ -8,6 +8,6 @@
   - Send `game_points` per player — Windex computes the head-to-head differential (`score_value = N × game_points - round_total`) server-side
   - Reference `shared-golf-types` for shared player/round TypeScript types
   - Scorekeeper does NOT need to compute standings or differentials — Windex handles all aggregation
-  - Test with the adapter pattern in `late-add-api/adapters/` and `docs/SOURCE_ADAPTERS.md`
+  - Test with the adapter pattern in `windex-api/adapters/` and `docs/SOURCE_ADAPTERS.md`
 
 - ~~**Round edit/delete permission enforcement:**~~ **Done.** Edit/delete buttons on Round Detail are now hidden for members. `GroupContext` resolves `isSuperAdmin` and `isGroupAdmin(groupId)` on login via RPC. Backend RLS enforces at DB level as backup.

@@ -1,7 +1,7 @@
 /**
- * API client for Windex (late-add-api).
+ * API client for Windex (windex-api).
  * Base URL from env; all requests use Bearer JWT when token is set.
- * Assumes late-add-api Edge Functions base: /functions/v1
+ * Assumes windex-api Edge Functions base: /functions/v1
  */
 const BASE =
   typeof import.meta.env !== 'undefined' && import.meta.env.VITE_LATE_ADD_API_URL
@@ -62,7 +62,7 @@ export async function apiFetch<T>(
       // use text as message
     }
     const msg = (body as { error?: string })?.error ?? text;
-    const withPath = res.status === 404 && path ? `Endpoint not implemented (404): ${path}. Add in late-add-api or use PostgREST.` : msg;
+    const withPath = res.status === 404 && path ? `Endpoint not implemented (404): ${path}. Add in windex-api or use PostgREST.` : msg;
     throw new ApiError(res.status, withPath, body, path);
   }
   if (!text) return undefined as T;

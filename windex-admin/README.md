@@ -2,10 +2,10 @@
 
 Standalone admin web app for Windex: Dashboard, Rounds, Round Entry, Round Edit, Standings, Groups, Players, Points Analysis, Attribution Review, Player Mapping. Built with Vite + React + TypeScript + React Router.
 
-**Testing order:** Validate features here in the **web admin UI first**; then repeat checks on **iPad / iPhone** via `late-add-expo/` (see parent [README.md](../README.md#recommended-testing-order)).
+**Testing order:** Validate features here in the **web admin UI first**; then repeat checks on **iPad / iPhone** via `windex-expo/` (see parent [README.md](../README.md#recommended-testing-order)).
 
 - **Docs:** See the parent folder (this Windex directory) for product and API docs (README.md and linked .md files).
-- **API:** Talks to **late-add-api** (Supabase Cloud Edge Functions). Default: `https://ftmqzxykwcccocogkjhc.supabase.co/functions/v1`. Set `VITE_LATE_ADD_API_URL` in `.env.local` to override.
+- **API:** Talks to **windex-api** (Supabase Cloud Edge Functions). Default: `https://ftmqzxykwcccocogkjhc.supabase.co/functions/v1`. Set `VITE_LATE_ADD_API_URL` in `.env.local` to override.
 
 ## First-time setup
 
@@ -20,9 +20,9 @@ Standalone admin web app for Windex: Dashboard, Rounds, Round Entry, Round Edit,
    ```
    Defaults point to Supabase Cloud (`ftmqzxykwcccocogkjhc`). No edits needed for normal dev.
 
-3. **Ensure backend is deployed** (from `late-add-api/`):
+3. **Ensure backend is deployed** (from `windex-api/`):
    ```bash
-   cd ../late-add-api
+   cd ../windex-api
    supabase login --token <your-access-token>
    supabase link --project-ref ftmqzxykwcccocogkjhc
    supabase db push          # apply migrations

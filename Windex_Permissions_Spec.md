@@ -61,7 +61,7 @@
 | View standings + rounds — any group | Yes | Yes | Yes (read only) |
 | Browse all groups (logged in) | Yes | Yes | Yes |
 | View any data without login | No | No | No |
-| Access late-add-admin UI | Yes | No | No |
+| Access windex-admin UI | Yes | No | No |
 | Audit trail visibility | Yes (web admin only) | No | No |
 
 ---
@@ -74,7 +74,7 @@
 - **Season-based creation rule:** Members can only create rounds in the current (active) season (end_date >= today). Group admins and super admins can create rounds in any season (past or current) to support backfilling.
 - No admin approval required before scores are submitted.
 - Deleted rounds are excluded from standings automatically.
-- Audit trail exists in backend; UI only in late-add-admin.
+- Audit trail exists in backend; UI only in windex-admin.
 
 ---
 

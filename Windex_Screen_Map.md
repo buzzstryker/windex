@@ -21,8 +21,8 @@ Windex supports events (rounds) from three paths. All converge into the same can
 ## App entry and navigation
 
 - **Dashboard** — Top-level entry; summary cards and recent rounds; links to Rounds, Attribution Review, Player Mapping, Standings. Dev tools: Reset & Import Glide Data, Import New Rounds.
-- **Expo app (late-add-expo) tab bar** — 3 tabs: Standings, Rounds, Analysis. Olive green headers with tab name only. Hamburger drawer for group selection (My Groups / Other Groups with logo thumbnails + checkmark), Group Details, Sign out.
-- **Admin web UI (late-add-admin) nav** — Dashboard, Rounds, Round Entry, Standings, Groups, Players, Points Analysis, Attribution Review, Player Mapping.
+- **Expo app (windex-expo) tab bar** — 3 tabs: Standings, Rounds, Analysis. Olive green headers with tab name only. Hamburger drawer for group selection (My Groups / Other Groups with logo thumbnails + checkmark), Group Details, Sign out.
+- **Admin web UI (windex-admin) nav** — Dashboard, Rounds, Round Entry, Standings, Groups, Players, Points Analysis, Attribution Review, Player Mapping.
 - **Round-centric** — Round detail links to Edit/Override, Attribution Review, and Player Mapping where relevant.
 
 ---
@@ -42,7 +42,7 @@ Windex supports events (rounds) from three paths. All converge into the same can
 | **Standings** | Shared group/season context with group selector modal (tap header → bottom sheet with groups by section, season pills). Points-only table with medals, dollar/point amounts, alternating rows. Default group = most recently active. Route: `/standings`. |
 | **Groups** | List groups. Route: `/groups`. |
 | **Players** | View and edit player data by group: display name, full name, email, Venmo, role, active status. Inline editing. Route: `/players`. |
-| **Points Analysis** | Game points differential analysis. All-vs-all matrix via `GET /get-points-matrix`, head-to-head drill-down via `GET /get-points-analysis`. All computation server-side; both late-add-admin and late-add-expo render the same API responses. Season filter (2023+), Exclude Signature Events toggle. Worst matchups table with player filter. Click any cell or row to drill into detail. Admin route: `/analytics/points`. Expo: Analysis tab. |
+| **Points Analysis** | Game points differential analysis. All-vs-all matrix via `GET /get-points-matrix`, head-to-head drill-down via `GET /get-points-analysis`. All computation server-side; both windex-admin and windex-expo render the same API responses. Season filter (2023+), Exclude Signature Events toggle. Worst matchups table with player filter. Click any cell or row to drill into detail. Admin route: `/analytics/points`. Expo: Analysis tab. |
 | **Seasons** | List and manage seasons per group. |
 | **Payout config** | Group-level payout (e.g. dollars_per_point) if exposed. |
 | **Payment requests** | For a round: compute-money-deltas then generate-payment-requests; display payer→payee list. |

@@ -1,6 +1,6 @@
 # Windex Admin UI — Implementation Summary
 
-Summary of the first usable admin UI in **`late-add-admin/`** (Vite + React) in this directory. No backend or Scorekeeper app code was changed.
+Summary of the first usable admin UI in **`windex-admin/`** (Vite + React) in this directory. No backend or Scorekeeper app code was changed.
 
 ---
 
@@ -53,9 +53,9 @@ Summary of the first usable admin UI in **`late-add-admin/`** (Vite + React) in 
 
 - **Base URL** — From `VITE_LATE_ADD_API_URL` (default `https://ftmqzxykwcccocogkjhc.supabase.co/functions/v1`). All requests use `Authorization: Bearer <JWT>` when token is set (see `api/client.ts`).
 - **Documented and used**  
-  - `POST /ingest-event-results` — Used for manual round entry and matches late-add-api contract.  
+  - `POST /ingest-event-results` — Used for manual round entry and matches windex-api contract.  
   - `GET /get-standings?season_id=&group_id=` — Used for Standings screen.
-- **Assumed for UI to work** (may not exist yet in late-add-api):  
+- **Assumed for UI to work** (may not exist yet in windex-api):  
   - `GET /events` — List events (query: group_id, season_id, source_app, status, from_date, to_date).  
   - `GET /events/:eventId` — Event detail with results.  
   - `GET /groups` — List groups.  
@@ -66,7 +66,7 @@ Summary of the first usable admin UI in **`late-add-admin/`** (Vite + React) in 
   - `POST /review/player-mapping/:id/resolve` — Body: `{ player_id }`.  
   - `PATCH /events/:eventId` — Update event metadata and/or results (see backend gaps).
 
-If list/detail/review endpoints are missing, the UI will show empty lists or errors until late-add-api adds them (or exposes equivalent data via PostgREST).
+If list/detail/review endpoints are missing, the UI will show empty lists or errors until windex-api adds them (or exposes equivalent data via PostgREST).
 
 ---
 
@@ -78,7 +78,7 @@ If list/detail/review endpoints are missing, the UI will show empty lists or err
 - **Player mapping** — If `GET /review/player-mapping` and `POST /review/player-mapping/:id/resolve` do not exist, the Player Mapping screen stays empty and mapping is impossible.
 - **Round update** — If `PATCH /events/:eventId` (or equivalent) is not implemented, Round edit will fail on save. The UI does not invent an alternative; the backend should define the update contract (allowed fields, validation, audit if any).
 
-Recommendation: Add the above endpoints (or equivalent PostgREST usage) in late-add-api and document them in `docs/api.md`. The admin UI is built to call these paths and body shapes.
+Recommendation: Add the above endpoints (or equivalent PostgREST usage) in windex-api and document them in `docs/api.md`. The admin UI is built to call these paths and body shapes.
 
 ---
 
@@ -86,19 +86,19 @@ Recommendation: Add the above endpoints (or equivalent PostgREST usage) in late-
 
 - **Windex_Screen_Map.md** — Updated to state three ways events enter (API ingestion, manual entry, round edit/override); added Dashboard, Events, Event detail, Round entry, Round edit, Attribution review, Player mapping, Standings; normalized status values; added flows.
 - **Windex_UI_Architecture.md** — Updated UI goals (manual entry and round override as first-class); application structure and routing; API interaction (manual creation, update); shared UI requirements and status design.
-- **README.md** (this directory) — Noted that the first usable admin UI lives in `late-add-admin/` and supports API ingestion, manual round entry, and round edit/override.
+- **README.md** (this directory) — Noted that the first usable admin UI lives in `windex-admin/` and supports API ingestion, manual round entry, and round edit/override.
 
 ---
 
 ## 7. Where the code lives
 
-- **App and routing:** `late-add-admin/src/App.tsx`, `main.tsx`, `components/Layout.tsx`
-- **Pages:** `late-add-admin/src/pages/` (Login, Dashboard, Events, EventDetail, RoundEntry, RoundEdit, AttributionReview, PlayerMapping, Standings, Groups, GroupDetail)
-- **API:** `late-add-admin/src/api/` (client, events, standings, groups, attribution, playerMapping)
-- **Types:** `late-add-admin/src/types/index.ts`
-- **Shared components:** `late-add-admin/src/components/`
+- **App and routing:** `windex-admin/src/App.tsx`, `main.tsx`, `components/Layout.tsx`
+- **Pages:** `windex-admin/src/pages/` (Login, Dashboard, Events, EventDetail, RoundEntry, RoundEdit, AttributionReview, PlayerMapping, Standings, Groups, GroupDetail)
+- **API:** `windex-admin/src/api/` (client, events, standings, groups, attribution, playerMapping)
+- **Types:** `windex-admin/src/types/index.ts`
+- **Shared components:** `windex-admin/src/components/`
 
-To run: `cd late-add-admin && npm install && npm run dev` (see `late-add-admin/README.md`).
+To run: `cd windex-admin && npm install && npm run dev` (see `windex-admin/README.md`).
 
 ---
 
