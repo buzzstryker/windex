@@ -84,7 +84,7 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Image source={require('@/assets/images/late-add-icon.png')} style={styles.appIcon} />
+              <Image source={require('@/assets/images/icon.png')} style={styles.appIcon} />
               <Text style={[styles.appTitle, { color: textColor }]}>Windex</Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
