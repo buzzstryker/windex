@@ -1,11 +1,11 @@
 {
-  "name": "late-add-v2-repo",
+  "name": "windex-repo",
   "private": true,
-  "description": "Monorepo root — mobile app lives in mobile/late-add-v2",
+  "description": "Monorepo root — mobile app lives in mobile/windex",
   "scripts": {
-    "mobile": "npm run start --prefix mobile/late-add-v2",
-    "start": "npm run start --prefix mobile/late-add-v2",
-    "start:tunnel": "npm run start:tunnel --prefix mobile/late-add-v2",
-    "start:lan": "npm run start:lan --prefix mobile/late-add-v2"
+    "mobile": "npm run start --prefix mobile/windex",
+    "start": "npm run start --prefix mobile/windex",
+    "start:tunnel": "npm run start:tunnel --prefix mobile/windex",
+    "start:lan": "npm run start:lan --prefix mobile/windex"
   }
 }

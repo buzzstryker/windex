@@ -1,0 +1,23 @@
+{
+  "name": "windex-api",
+  "private": true,
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
+  "scripts": {
+    "test:local": "node tests/api_test.mjs",
+    "test:integration": "node tests/integration.mjs",
+    "test:domain": "node tests/domain-rules.mjs",
+    "test:adapter": "node tests/adapter-ingest.mjs",
+    "glide:convert": "node scripts/convert-glide-ods-to-ingest.mjs",
+    "glide:import": "node scripts/run-glide-import.mjs",
+    "glide:sync-structure": "node scripts/sync-glide-structure.mjs",
+    "glide:sync-members": "node scripts/sync-glide-members.mjs",
+    "glide:import-all": "node scripts/glide-import-all.mjs",
+    "test:glide-members": "node tests/glide-members-sync.mjs"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5"
+  }
+}
