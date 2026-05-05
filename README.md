@@ -110,7 +110,7 @@ Screens and navigation can be designed around these flows; the API contract and 
 ## Developer setup
 
 - **windex-api** (Windex backend): See [windex-api/README.md](./windex-api/README.md) and [windex-api/docs/](./windex-api/docs/). Typical flow: `cd windex-api`, `npm install`, copy `.env` from `.env.example`, `supabase login --token <token>`, `supabase link --project-ref ftmqzxykwcccocogkjhc`, `supabase db push`, `supabase functions deploy --no-verify-jwt`, `supabase config push`. We use **Supabase Cloud exclusively** (no local Supabase). The `--no-verify-jwt` flag is required because functions handle auth internally. Run integration/domain tests against the cloud project as documented there.
-- **windex-expo** (web + mobile app): See [windex-expo/README.md](./windex-expo/README.md). Web deployment on Vercel at `https://app.lateaddgolf.com`. Auth via email OTP (6-digit code). PWA-ready with home screen icon.
+- **windex-expo** (web + mobile app): See [windex-expo/README.md](./windex-expo/README.md). Web deployment on Vercel at `https://windexgolf.com`. Auth via email OTP (6-digit code). PWA-ready with home screen icon.
 - **windex-admin** (admin UI): See [windex-admin/README.md](./windex-admin/README.md) for first-time setup and per-session instructions.
 - **Source apps** (e.g. any golf app that calls the Windex API): Separate codebases; each implements its own client and auth to call the API.
 - **Full API contract, validation rules, and error codes**: [windex-api/docs/](./windex-api/docs/) (api.md, payout-configuration-design.md, settlement-calculation-design.md).

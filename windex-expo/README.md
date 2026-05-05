@@ -4,7 +4,7 @@ Expo app for Late Add Golf v2 — web (Vercel), iOS, and Android via Expo Go.
 
 ## Web deployment
 
-- **Production:** https://app.lateaddgolf.com (Vercel, auto-deploys from `master`)
+- **Production:** https://windexgolf.com (Vercel, auto-deploys from `master`). `app.lateaddgolf.com` 308-redirects here for legacy bookmarks.
 - **Vercel root directory:** `windex-expo/`
 - **Build:** `npx expo export --platform web` → outputs to `dist/`
 
@@ -74,8 +74,8 @@ To get the app icon on iPhone: Safari > Share > Add to Home Screen.
 ## Supabase configuration
 
 ### Auth settings (pushed via `supabase config push`)
-- **Site URL:** `https://app.lateaddgolf.com`
-- **Redirect URLs:** `https://app.lateaddgolf.com/**`, `https://late-add-v2.vercel.app/**`
+- **Site URL:** `https://windexgolf.com`
+- **Redirect URLs:** `https://windexgolf.com`, `https://windexgolf.com/**`, `https://www.windexgolf.com`, `https://www.windexgolf.com/**`, `https://late-add-v2.vercel.app`, `https://late-add-v2.vercel.app/**` (the `late-add-v2.vercel.app` entries track the Vercel project name and will be revisited when the Vercel project is renamed)
 - **OTP:** 6 digits, 1-hour expiry
 - **Email template:** Custom OTP-only template (shows code, no magic link)
 

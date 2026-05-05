@@ -13,7 +13,7 @@ export default function Root({ children }: PropsWithChildren) {
         />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#4B5E2A" />
+        <meta name="theme-color" content="#091648" />
         <ScrollViewStyleReset />
       </head>
       <body>{children}</body>

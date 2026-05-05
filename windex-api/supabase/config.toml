@@ -29,16 +29,14 @@ file_size_limit = "50MiB"
 
 [auth]
 enabled = true
-site_url = "https://app.lateaddgolf.com"
+site_url = "https://windexgolf.com"
 additional_redirect_urls = [
-  "https://app.lateaddgolf.com",
-  "https://app.lateaddgolf.com/**",
-  "https://late-add-v2.vercel.app",
-  "https://late-add-v2.vercel.app/**",
   "https://windexgolf.com",
   "https://windexgolf.com/**",
   "https://www.windexgolf.com",
   "https://www.windexgolf.com/**",
+  "https://late-add-v2.vercel.app",
+  "https://late-add-v2.vercel.app/**",
 ]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true

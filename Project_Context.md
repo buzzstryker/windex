@@ -13,7 +13,7 @@ Windex (formerly **Late Add v2**) is a **points ledger + standings aggregation p
 - **Mobile / PWA:** Expo SDK 54, React 19, React Native 0.81, Expo Router 6 (`windex-expo/`). Web build via `npx expo export --platform web`. iOS/Android via Expo Go for dev; native production builds out of current scope.
 - **Admin web UI:** Vite 5, React 18, React Router 6 (`windex-admin/`). Internal tool for league admins.
 - **Backend / API:** Supabase Cloud — Postgres 15 + Auth + Edge Functions (Deno) (`windex-api/`). 15 Edge Functions; 19 numbered SQL migrations.
-- **Hosting:** Vercel — auto-deploys `windex-expo/` to `app.lateaddgolf.com` from `master`. Vercel `ignoreCommand` skips builds when commits don't touch the deployed folder.
+- **Hosting:** Vercel — auto-deploys `windex-expo/` to `windexgolf.com` from `master`. Vercel `ignoreCommand` skips builds when commits don't touch the deployed folder.
 - **Auth:** Supabase email OTP (6-digit code) with email/password fallback. No deep-link or magic-link flow. JWTs stored client-side (sessionStorage on web, expo-file-system on native).
 - **Other:** Glide ODS export → Supabase ingest pipeline (one-time migration path, still wired); Venmo deep-links for client-side payout settlement (`venmo://` and `https://venmo.com/`); shared-golf-types is a planned shared types package, not yet extracted.
 
@@ -68,11 +68,11 @@ Implemented in `windex-api/supabase/migrations/`. Atomic-records-only; standings
 
 ## Live URLs
 
-- **Production (PWA):** https://app.lateaddgolf.com — still on the `lateaddgolf.com` domain post-rename. **Domain cutover to `windexgolf.com` is a separate session, not yet scheduled.**
+- **Production (PWA):** https://windexgolf.com — cut over from `app.lateaddgolf.com` on 2026-05-05; `app.lateaddgolf.com` now 308-redirects to `windexgolf.com` (kept as redirect source for legacy bookmarks; do not delete or unlink). `lateaddgolf.com` (apex) and `www.lateaddgolf.com` remain GoDaddy parking pages and were intentionally never wired to Vercel.
 - **GitHub repo:** https://github.com/buzzstryker/windex
 - **Supabase project ID (ref):** `ftmqzxykwcccocogkjhc` (URL: `https://ftmqzxykwcccocogkjhc.supabase.co`). Project ref unchanged across the rename.
 - **Vercel project name:** `late-add-v2` (still — rename of the Vercel project is deferred; it doesn't affect production URL or the build, only the auto-generated `*.vercel.app` preview URLs). Project's **Root Directory** setting was updated `late-add-expo` → `windex-expo` on 2026-05-05 alongside the folder rename.
-- **Supabase auth additional_redirect_urls:** `https://app.lateaddgolf.com/**` and `https://late-add-v2.vercel.app/**` (the second one tracks the Vercel-project name and gets revisited when the Vercel project is renamed).
+- **Supabase auth additional_redirect_urls:** `https://windexgolf.com/**`, `https://www.windexgolf.com/**`, and `https://late-add-v2.vercel.app/**` (the third one tracks the Vercel-project name and gets revisited when the Vercel project is renamed). `site_url` is `https://windexgolf.com`.
 
 ---
 
