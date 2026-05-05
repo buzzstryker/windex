@@ -69,13 +69,13 @@ export function PlayerMapping() {
 
   return (
     <>
-      <PageHeader title="Player mapping" subtitle="Map source players to Late Add players" />
+      <PageHeader title="Player mapping" subtitle="Map source players to Windex players" />
       {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} />}
       <div className="card">
         {items.length === 0 ? (
           <EmptyState
             message="No unresolved player mapping items."
-            detail="When a source player can’t be matched to a Late Add player, they appear here. Resolve to map them for future ingestion."
+            detail="When a source player can’t be matched to a Windex player, they appear here. Resolve to map them for future ingestion."
           />
         ) : (
           <>

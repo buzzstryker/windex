@@ -109,7 +109,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}>
           <ThemedText type="title" style={styles.title}>
-            Late Add
+            Windex
           </ThemedText>
 
           {!otpSent ? (

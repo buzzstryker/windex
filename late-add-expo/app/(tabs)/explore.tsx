@@ -23,7 +23,7 @@ export default function AboutScreen() {
           About
         </ThemedText>
         <ThemedText style={[styles.p, { color: muted }]}>
-          <ThemedText type="defaultSemiBold">Late Add v2</ThemedText> aggregates points and
+          <ThemedText type="defaultSemiBold">Windex</ThemedText> aggregates points and
           standings from submitted rounds. This iPad app talks to the same backend as your admin
           workflow.
         </ThemedText>

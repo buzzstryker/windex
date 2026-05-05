@@ -85,7 +85,7 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
           <View style={styles.header}>
             <View style={styles.headerLeft}>
               <Image source={require('@/assets/images/late-add-icon.png')} style={styles.appIcon} />
-              <Text style={[styles.appTitle, { color: textColor }]}>Late Add Golf</Text>
+              <Text style={[styles.appTitle, { color: textColor }]}>Windex</Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
               <MaterialIcons name="close" size={24} color={mutedColor} />
