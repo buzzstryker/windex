@@ -1,5 +1,5 @@
 /**
- * API client for Late Add v2 (late-add-api).
+ * API client for Windex (late-add-api).
  * Base URL from env; all requests use Bearer JWT when token is set.
  * Assumes late-add-api Edge Functions base: /functions/v1
  */

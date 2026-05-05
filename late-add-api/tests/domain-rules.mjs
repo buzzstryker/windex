@@ -1,5 +1,5 @@
 /**
- * Domain rule tests for Late Add v2 backend.
+ * Domain rule tests for Windex backend.
  * Verifies business rules (scoring mode, event structure, membership, idempotency, override, standings).
  * Requires: supabase start, supabase db reset, supabase functions serve.
  * Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY.
@@ -64,7 +64,7 @@ async function runTests() {
     if (cond) { console.log("  OK   ", name); passed++; } else { console.log("  FAIL ", name, detail); failed++; }
   };
 
-  console.log("\n--- 1. Late Add stores points, not raw golf scores ---");
+  console.log("\n--- 1. Windex stores points, not raw golf scores ---");
   const rStroke = await ingest(token, {
     group_id: GROUP_POINTS,
     season_id: SEASON_POINTS,

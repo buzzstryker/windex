@@ -1,5 +1,5 @@
 /**
- * Convert a Glide ODS export into Late Add v2 ingest-event-results payloads.
+ * Convert a Glide ODS export into Windex ingest-event-results payloads.
  *
  * Usage:
  *   node scripts/convert-glide-ods-to-ingest.mjs <path-to.ods> --group-id=<LATE_ADD_GROUP_ID> --season-id=<LATE_ADD_SEASON_ID>
@@ -8,7 +8,7 @@
  * Each round file is a full POST body for /ingest-event-results. Uses source_app "glide"
  * and source_player_ref/source_player_name so unresolved players go to player_mapping_queue.
  *
- * Requires: group_id and season_id from your Late Add v2 instance (create group/season first).
+ * Requires: group_id and season_id from your Windex instance (create group/season first).
  */
 import { writeFileSync, readFileSync, mkdirSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';

@@ -1,5 +1,5 @@
 // Round-scoped payment request generation. Reads money_delta for a round and returns
-// the minimal set of payer -> payee requests. Does not persist; Late Add does not track payment completion.
+// the minimal set of payer -> payee requests. Does not persist; Windex does not track payment completion.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

@@ -1,18 +1,18 @@
-# Late Add v2 — Screen Map
+# Windex — Screen Map
 
-Screens and flows for the Late Add app. For terminology (Group, Season, Event, Result, Standings, Source app) see [README — Terminology](./README.md#terminology). For UI structure and routing see [UI Architecture](./Late_Add_V2_UI_Architecture.md).
+Screens and flows for the Windex app. For terminology (Group, Season, Event, Result, Standings, Source app) see [README — Terminology](./README.md#terminology). For UI structure and routing see [UI Architecture](./Windex_UI_Architecture.md).
 
 ---
 
 ## Product scope: three ways events enter the system
 
-Late Add v2 supports events (rounds) from three paths. All converge into the same canonical event/result model in the backend; the UI does not maintain separate "manual-only" logic beyond source labeling and input workflow.
+Windex supports events (rounds) from three paths. All converge into the same canonical event/result model in the backend; the UI does not maintain separate "manual-only" logic beyond source labeling and input workflow.
 
-**Core product rule:** Manual entry and ingested rounds must converge into the same canonical event/result model in the backend. The UI must not create separate "manual-only" logic beyond source labeling and the input workflow. Standings aggregation, attribution, validation, and correction remain backend responsibilities. Late Add does not compute golf competition formats (e.g. Stableford, match play); it ingests and aggregates point totals. The UI is operational (round creation and correction), not limited to passive review.
+**Core product rule:** Manual entry and ingested rounds must converge into the same canonical event/result model in the backend. The UI must not create separate "manual-only" logic beyond source labeling and the input workflow. Standings aggregation, attribution, validation, and correction remain backend responsibilities. Windex does not compute golf competition formats (e.g. Stableford, match play); it ingests and aggregates point totals. The UI is operational (round creation and correction), not limited to passive review.
 
 | Source | Description |
 |--------|-------------|
-| **API ingestion** | External apps (e.g. Scorekeeper, 18Birdies) POST event results to the Late Add API. Events appear in the system with `source_app` and optional `external_event_id` for attribution and idempotency. |
+| **API ingestion** | External apps (e.g. Scorekeeper, 18Birdies) POST event results to the Windex API. Events appear in the system with `source_app` and optional `external_event_id` for attribution and idempotency. |
 | **Manual round entry** | Admins create a round/event directly in the UI when no external app supplied results or when direct entry is faster. Treated as a first-class workflow; submitted to the same backend path as ingestion (e.g. manual as `source_app`). |
 | **Round edit / override** | Admins correct bad ingests, adjust entered rounds, and override round details or results. Changes flow through the backend; standings aggregation remains a backend responsibility. |
 
@@ -38,7 +38,7 @@ Late Add v2 supports events (rounds) from three paths. All converge into the sam
 | **Round Entry** | Manual round creation. Form: group, season, played date, players, scores. Route: `/events/new`. |
 | **Round edit / override** | Correction of existing round. Entry from round detail; route: `/events/:eventId/edit`. Edit metadata, players, scores; optional override reason. |
 | **Attribution Review** | Queue of rounds with unresolved attribution; admin chooses correct group/season and submits resolution. Route: `/review/attribution`. |
-| **Player Mapping** | Queue of unmapped source players; admin maps to existing Late Add player and confirms. Route: `/review/player-mapping`. |
+| **Player Mapping** | Queue of unmapped source players; admin maps to existing Windex player and confirms. Route: `/review/player-mapping`. |
 | **Standings** | Shared group/season context with group selector modal (tap header → bottom sheet with groups by section, season pills). Points-only table with medals, dollar/point amounts, alternating rows. Default group = most recently active. Route: `/standings`. |
 | **Groups** | List groups. Route: `/groups`. |
 | **Players** | View and edit player data by group: display name, full name, email, Venmo, role, active status. Inline editing. Route: `/players`. |
@@ -53,7 +53,7 @@ Late Add v2 supports events (rounds) from three paths. All converge into the sam
 
 - **processed** — Event fully processed and attributed.
 - **pending attribution** — Awaiting admin resolution of group/season (or duplicate) attribution.
-- **pending player mapping** — One or more source players not yet mapped to Late Add players.
+- **pending player mapping** — One or more source players not yet mapped to Windex players.
 - **validation error** — Ingestion or update failed validation; needs correction.
 - **duplicate / ignored** — Treated as duplicate by backend (e.g. same source_app + external_event_id).
 
@@ -65,7 +65,7 @@ Late Add v2 supports events (rounds) from three paths. All converge into the sam
 - **Manual entry** — Events → New Round → fill form → submit → redirect to event detail or events list.
 - **Correct round** — Event detail → Edit/Override → change fields → save → back to event detail; backend recalculates standings.
 - **Resolve attribution** — Dashboard or Events → Attribution Review → select item → choose group/season → submit → item removed from queue.
-- **Resolve player mapping** — Dashboard or Events → Player Mapping → select unmapped player → choose Late Add player → confirm → removed from queue.
+- **Resolve player mapping** — Dashboard or Events → Player Mapping → select unmapped player → choose Windex player → confirm → removed from queue.
 - **View standings** — Standings → select Group + Season → display API response; no client-side calculation.
 
 ---
@@ -73,5 +73,5 @@ Late Add v2 supports events (rounds) from three paths. All converge into the sam
 ## References
 
 - [README.md](./README.md)
-- [UI Architecture](./Late_Add_V2_UI_Architecture.md)
-- [API Spec](./Late_Add_V2_API_Spec.md)
+- [UI Architecture](./Windex_UI_Architecture.md)
+- [API Spec](./Windex_API_Spec.md)

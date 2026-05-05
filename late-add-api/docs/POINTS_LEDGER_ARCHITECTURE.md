@@ -1,6 +1,6 @@
 # Points Ledger + Standings Aggregation Architecture
 
-Late Add v2 operates as a **points ledger plus standings aggregation platform**. It stores only **awarded point totals** per player per event — no golf scorecard data, hole-by-hole scores, or stroke counts. Standings are always **derived** from atomic point records; they are never edited directly.
+Windex operates as a **points ledger plus standings aggregation platform**. It stores only **awarded point totals** per player per event — no golf scorecard data, hole-by-hole scores, or stroke counts. Standings are always **derived** from atomic point records; they are never edited directly.
 
 ---
 

@@ -1,10 +1,10 @@
-# Late Add v2 Admin UI
+# Windex Admin UI
 
-Standalone admin web app for Late Add v2: Dashboard, Rounds, Round Entry, Round Edit, Standings, Groups, Players, Points Analysis, Attribution Review, Player Mapping. Built with Vite + React + TypeScript + React Router.
+Standalone admin web app for Windex: Dashboard, Rounds, Round Entry, Round Edit, Standings, Groups, Players, Points Analysis, Attribution Review, Player Mapping. Built with Vite + React + TypeScript + React Router.
 
 **Testing order:** Validate features here in the **web admin UI first**; then repeat checks on **iPad / iPhone** via `late-add-expo/` (see parent [README.md](../README.md#recommended-testing-order)).
 
-- **Docs:** See the parent folder (this Late Add v2 directory) for product and API docs (README.md and linked .md files).
+- **Docs:** See the parent folder (this Windex directory) for product and API docs (README.md and linked .md files).
 - **API:** Talks to **late-add-api** (Supabase Cloud Edge Functions). Default: `https://ftmqzxykwcccocogkjhc.supabase.co/functions/v1`. Set `VITE_LATE_ADD_API_URL` in `.env.local` to override.
 
 ## First-time setup

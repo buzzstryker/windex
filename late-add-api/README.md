@@ -1,6 +1,6 @@
 # late-add-api
 
-API for Late Add Golf v2: points-ingestion and standings. Groups, seasons, league rounds, scores, and standings. Late Add does not compute golf competition formats; it accepts final point totals and stores/aggregates them. Backed by Supabase (Postgres, Auth, Edge Functions).
+API for Late Add Golf v2: points-ingestion and standings. Groups, seasons, league rounds, scores, and standings. Windex does not compute golf competition formats; it accepts final point totals and stores/aggregates them. Backed by Supabase (Postgres, Auth, Edge Functions).
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ API for Late Add Golf v2: points-ingestion and standings. Groups, seasons, leagu
 
 ## Setup
 
-1. From the Late Add v2 directory, go into the API folder and install:
+1. From the Windex directory, go into the API folder and install:
 
    ```bash
    cd late-add-api
@@ -85,9 +85,9 @@ This creates Supabase auth accounts for players with emails in specified groups,
 
 ## Glide ODS import
 
-To import a Glide app export (`.ods`) into Late Add v2:
+To import a Glide app export (`.ods`) into Windex:
 
-1. **Convert** the ODS to ingest payloads (use your Late Add v2 group and season IDs):
+1. **Convert** the ODS to ingest payloads (use your Windex group and season IDs):
    ```bash
    node scripts/convert-glide-ods-to-ingest.mjs "path/to/f35a60.Late Add Golf.ods" --group-id=group-seed-001 --season-id=season-seed-001
    ```
@@ -100,5 +100,5 @@ To import a Glide app export (`.ods`) into Late Add v2:
 ## Docs
 
 - Schema and bootstrap: `docs/`
-- Parent Late Add v2 directory: `../` (bootstrap plan, data model, API spec at root)
+- Parent Windex directory: `../` (bootstrap plan, data model, API spec at root)
 

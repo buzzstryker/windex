@@ -1,6 +1,6 @@
-# Glide v1 → Late Add v2 parity audit
+# Glide v1 → Windex parity audit
 
-Complete table-by-table and field-by-field parity assessment. **v1** = Glide app export (ODS: Sections, Groups, UserProfiles, Seasons, Rounds, Scores, Payout). **v2** = Late Add v2 schema, API, and import/sync paths.
+Complete table-by-table and field-by-field parity assessment. **v1** = Glide app export (ODS: Sections, Groups, UserProfiles, Seasons, Rounds, Scores, Payout). **v2** = Windex schema, API, and import/sync paths.
 
 ---
 
@@ -108,7 +108,7 @@ Complete table-by-table and field-by-field parity assessment. **v1** = Glide app
 
 ### 2.7 Payout (v1)
 
-*Glide Payout sheet: columns present in the reference converter are 🔒 Row ID and Index. The live Glide ODS may contain additional columns (e.g. player, amount, date, status); these are not used in the Late Add v2 import.*
+*Glide Payout sheet: columns present in the reference converter are 🔒 Row ID and Index. The live Glide ODS may contain additional columns (e.g. player, amount, date, status); these are not used in the Windex import.*
 
 | v1 field name | v2 field / destination | Transform | Import method | Status |
 |----------------|------------------------|-----------|---------------|--------|

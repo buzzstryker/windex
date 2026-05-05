@@ -1,6 +1,6 @@
 # shared-golf-types
 
-Shared TypeScript types used by late-add-api and by other apps (e.g. Late Add UI, or other golf apps that integrate with the API). Suggested repo structure:
+Shared TypeScript types used by late-add-api and by other apps (e.g. Windex UI, or other golf apps that integrate with the API). Suggested repo structure:
 
 ```
 shared-golf-types/

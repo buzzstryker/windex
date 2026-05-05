@@ -1,5 +1,5 @@
 /**
- * Invite players to Late Add v2 via Supabase magic link.
+ * Invite players to Windex via Supabase magic link.
  *
  * 1. Query active players in specified groups
  * 2. Create auth accounts via admin.inviteUserByEmail() (sends invite email)

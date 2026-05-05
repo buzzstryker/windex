@@ -1,6 +1,6 @@
 # late-add-api repo bootstrap plan
 
-Based on this Late Add v2 directory (Late Add v2 is a separate app from Scorekeeper). The **late-add-api** code and Supabase backend live in **`late-add-api/`** in this directory.
+Based on this Windex directory (Windex is a separate app from Scorekeeper). The **late-add-api** code and Supabase backend live in **`late-add-api/`** in this directory.
 
 ---
 
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS sections (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Groups (Late Add leagues)
+-- Groups (Windex leagues)
 CREATE TABLE IF NOT EXISTS groups (
   id TEXT PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -189,7 +189,7 @@ Implementation notes:
 
 Move these out of **late-add-api** into **shared-golf-types** (e.g. `src/late-add/` and `src/scorekeeper/`) so both the app and API consume the same definitions:
 
-- **Late Add / league:** `Section`, `Group`, `GroupMember`, `Season`, `LeagueRound`, `LeagueScore` (and create/update DTOs).
+- **Windex / league:** `Section`, `Group`, `GroupMember`, `Season`, `LeagueRound`, `LeagueScore` (and create/update DTOs).
 - **Enums:** Group member role (`member` | `admin`), round type, handicap mode, league round `scores_override` flag.
 - **Other golf apps (for sync/compat):** Minimal `Player` (id, name, handicap_index, ghin_number), `Course`, `Round`, `Score` — at least the fields a source app or sync layer might use.
 
@@ -243,7 +243,7 @@ We use **Supabase Cloud exclusively** (no local Supabase).
 ## Docs
 
 - API and behavior: see `docs/`
-- Schema and bootstrap: see this Late Add v2 directory (bootstrap plan, migrations, shared-golf-types).
+- Schema and bootstrap: see this Windex directory (bootstrap plan, migrations, shared-golf-types).
 ```
 
 ---
@@ -256,4 +256,4 @@ We use **Supabase Cloud exclusively** (no local Supabase).
 | **Migrations** | Timestamped files in `supabase/migrations/`; first three: initial schema (sections, groups, members, seasons), league_rounds + league_scores, RLS. |
 | **First endpoints** | Edge Functions: `health`, `groups-list`, `group-by-id`, `seasons-by-group`. |
 | **Types** | Start in `src/types/`; move Section, Group, Season, LeagueRound, LeagueScore, and shared enums to **shared-golf-types** when that package exists. |
-| **README** | Use the minimal README in §6; link to this bootstrap plan and this Late Add v2 directory. |
+| **README** | Use the minimal README in §6; link to this bootstrap plan and this Windex directory. |

@@ -6,7 +6,7 @@ Use as **late-add-api/CLAUDE.md** (template; the project already has [late-add-a
 
 ## Project
 
-late-add-api is the backend/API for Late Add v2 (a standalone app, separate from Scorekeeper). Groups, seasons, league rounds, and scores. Supabase (Postgres, Auth, Edge Functions). Consumed by the Late Add app and by any other source apps that call the API; types shared with shared-golf-types where possible.
+late-add-api is the backend/API for Windex (a standalone app, separate from Scorekeeper). Groups, seasons, league rounds, and scores. Supabase (Postgres, Auth, Edge Functions). Consumed by the Windex app and by any other source apps that call the API; types shared with shared-golf-types where possible.
 
 ## Repo structure
 

@@ -15,7 +15,7 @@ export async function listPlayerMappingQueue(): Promise<PlayerMappingItem[]> {
 }
 
 /**
- * Resolve player mapping: link source identity to Late Add player. Assumes POST /review/player-mapping/:id/resolve.
+ * Resolve player mapping: link source identity to Windex player. Assumes POST /review/player-mapping/:id/resolve.
  */
 export async function resolvePlayerMapping(
   itemId: string,

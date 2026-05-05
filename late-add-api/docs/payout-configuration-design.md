@@ -1,4 +1,4 @@
-# Payout Configuration Model — Late Add v2
+# Payout Configuration Model — Windex
 
 Minimal design to enable real **money_delta** computation in `compute-money-deltas` without changing standings or adding a settlements table.
 

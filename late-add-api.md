@@ -1,6 +1,6 @@
 # late-add-api — Structure
 
-Backend/API for Late Add v2. Lives in **`late-add-api/`** in this directory. Product overview: [README.md](./README.md). Setup and run: [late-add-api/README.md](./late-add-api/README.md).
+Backend/API for Windex. Lives in **`late-add-api/`** in this directory. Product overview: [README.md](./README.md). Setup and run: [late-add-api/README.md](./late-add-api/README.md).
 
 **Structure:**
 

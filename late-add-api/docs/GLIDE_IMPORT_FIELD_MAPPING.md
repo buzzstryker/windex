@@ -1,12 +1,12 @@
-# Glide ODS → Late Add v2 field mapping
+# Glide ODS → Windex field mapping
 
-All Glide export fields now have a place in Late Add v2. **Glide v1 username (Identity/Username) is preserved:** it lands in **players.display_name** (sync-members) and in **source_player_name** (round ingest). The canonical import workflow is: **(1) glide:sync-structure**, **(2) glide:sync-members**, **(3) glide:convert**, **(4) glide:import**.
+All Glide export fields now have a place in Windex. **Glide v1 username (Identity/Username) is preserved:** it lands in **players.display_name** (sync-members) and in **source_player_name** (round ingest). The canonical import workflow is: **(1) glide:sync-structure**, **(2) glide:sync-members**, **(3) glide:convert**, **(4) glide:import**.
 
 ---
 
 ## Round ingest (convert + import)
 
-| Glide sheet   | Glide column        | Late Add v2 target |
+| Glide sheet   | Glide column        | Windex target |
 |---------------|---------------------|--------------------|
 | Rounds        | 🔒 Row ID           | `external_event_id` (idempotency) |
 | Rounds        | Round/Date          | `round_date` |
@@ -33,7 +33,7 @@ All Glide export fields now have a place in Late Add v2. **Glide v1 username (Id
 
 Run **first** so sections, groups, and seasons exist with the same IDs as in Glide. Then use those IDs as `--group-id` and `--season-id` when running **glide:convert**.
 
-| Glide sheet   | Glide column        | Late Add v2 target |
+| Glide sheet   | Glide column        | Windex target |
 |---------------|---------------------|--------------------|
 | Sections      | 🔒 Row ID           | `sections.id` (used as stable ID for sync) |
 | Sections      | Section/Name        | `sections.name` |
@@ -48,7 +48,7 @@ Run **first** so sections, groups, and seasons exist with the same IDs as in Gli
 | Seasons       | Season/Start Date   | `seasons.start_date` |
 | Seasons       | Season/End Date     | `seasons.end_date` |
 
-**Note:** `Group/Created At` from Glide is not stored; Late Add uses server `created_at`/`updated_at`. Sync updates `updated_at` on upsert.
+**Note:** `Group/Created At` from Glide is not stored; Windex uses server `created_at`/`updated_at`. Sync updates `updated_at` on upsert.
 
 ---
 
@@ -56,7 +56,7 @@ Run **first** so sections, groups, and seasons exist with the same IDs as in Gli
 
 | Glide sheet   | Note |
 |---------------|------|
-| Payouts       | No mapping. Late Add v2 has `money_delta` and its own payout/settlement logic; Glide payout rows are not imported. |
+| Payouts       | No mapping. Windex has `money_delta` and its own payout/settlement logic; Glide payout rows are not imported. |
 
 ---
 

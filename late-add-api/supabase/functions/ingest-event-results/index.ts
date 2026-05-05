@@ -1,5 +1,5 @@
 // Ingest event results: create a league_round and league_scores (points ledger rows) from POST body.
-// Late Add ingests only final awarded point totals per player — no golf scorecard data,
+// Windex ingests only final awarded point totals per player — no golf scorecard data,
 // hole-by-hole scores, gross/net, or stroke counts. Auth required; RLS enforces group/ownership.
 // Domain rules: scoring_mode (points vs win_loss_override input), season-group match, override metadata.
 

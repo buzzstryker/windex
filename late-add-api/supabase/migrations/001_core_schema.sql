@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS sections (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Groups (Late Add leagues)
+-- Groups (Windex leagues)
 CREATE TABLE IF NOT EXISTS groups (
   id TEXT PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,

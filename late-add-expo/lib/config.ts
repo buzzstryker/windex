@@ -1,5 +1,5 @@
 /**
- * Late Add API base (Edge Functions), same as late-add-admin VITE_LATE_ADD_API_URL.
+ * Windex API base (Edge Functions), same as late-add-admin VITE_LATE_ADD_API_URL.
  * Example: https://xxxx.supabase.co/functions/v1
  */
 export function getApiBase(): string {

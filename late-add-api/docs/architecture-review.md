@@ -1,6 +1,6 @@
-# Late Add v2 Backend — Architectural Review
+# Windex Backend — Architectural Review
 
-Technical summary of the current implementation after domain-rule tests pass. Late Add v2 operates as a **points ledger + standings aggregation platform**: atomic point records in `league_scores` are the single source of truth; standings are derived only from those records and are never edited directly. See [POINTS_LEDGER_ARCHITECTURE.md](./POINTS_LEDGER_ARCHITECTURE.md) for the full design.
+Technical summary of the current implementation after domain-rule tests pass. Windex operates as a **points ledger + standings aggregation platform**: atomic point records in `league_scores` are the single source of truth; standings are derived only from those records and are never edited directly. See [POINTS_LEDGER_ARCHITECTURE.md](./POINTS_LEDGER_ARCHITECTURE.md) for the full design.
 
 ---
 
@@ -113,7 +113,7 @@ Optional override (actor/reason required):
 ```
 
 - **result_type** required per score: `"win"` | `"loss"` | `"tie"`.  
-- API accepts this input and stores equivalent points (win=1, loss=0, tie=0.5) in **score_value**; **result_type** stored on league_scores. Outcome is determined by the source or admin; Late Add does not compute match-play or other format logic.
+- API accepts this input and stores equivalent points (win=1, loss=0, tie=0.5) in **score_value**; **result_type** stored on league_scores. Outcome is determined by the source or admin; Windex does not compute match-play or other format logic.
 
 ### Validation steps (order in code)
 
@@ -171,7 +171,7 @@ Optional override (actor/reason required):
 
 - **Payout / money_delta:** Not implemented. No column or table for monetary deltas or payouts per event or per player.
 - **Settlement tracking:** No settlements table. No concept of “settlement” or “settled at” for rounds or players.
-- **Group-configurable scoring rules:** Points range (-10..10) and stroke-like range (20..130) are hardcoded in the ingest function. win_loss input mapping (result_type → 1/0/0.5) is hardcoded; this is input normalization only—Late Add does not compute golf format (e.g. match-play) logic. No group-level or season-level config for these.
+- **Group-configurable scoring rules:** Points range (-10..10) and stroke-like range (20..130) are hardcoded in the ingest function. win_loss input mapping (result_type → 1/0/0.5) is hardcoded; this is input normalization only—Windex does not compute golf format (e.g. match-play) logic. No group-level or season-level config for these.
 - **Primary standings metric:** Standings are always total_points (sum of effective score), ordered descending. No configurable “primary metric” (e.g. net_winnings vs total_points).
 - **Ambiguous multi-group ingest:** Not applicable. Each ingest has a single group_id; no ambiguity. Multi-group is “same player in multiple groups, separate events per group.”
 

@@ -1,5 +1,5 @@
 /**
- * Sync Glide ODS structure (Sections, Groups, Seasons) into Late Add v2.
+ * Sync Glide ODS structure (Sections, Groups, Seasons) into Windex.
  * Creates or updates sections, groups, and seasons so Glide Section/Name,
  * Group/Name, Group/Logo, Season/Start Date, etc. all have a place.
  *

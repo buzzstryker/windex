@@ -1,4 +1,4 @@
-\# Late Add v2 System Architecture
+\# Windex System Architecture
 
 
 
@@ -35,7 +35,7 @@
 
 \- money is only for settlement/payment request generation
 
-\- Late Add does not track payment completion
+\- Windex does not track payment completion
 
 
 

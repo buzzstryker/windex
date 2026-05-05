@@ -1,6 +1,6 @@
 # Admin UI read/update endpoints — implementation summary
 
-Minimum backend support for the Late Add v2 admin UI (dashboard, events, round entry, round edit, standings, groups). Implemented as Supabase Edge Functions; RLS applies.
+Minimum backend support for the Windex admin UI (dashboard, events, round entry, round edit, standings, groups). Implemented as Supabase Edge Functions; RLS applies.
 
 ---
 

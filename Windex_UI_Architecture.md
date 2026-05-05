@@ -1,6 +1,6 @@
-# Late Add v2 — UI Architecture
+# Windex — UI Architecture
 
-Front-end structure for the Late Add admin UI. For screens and flows see [Screen Map](./Late_Add_V2_Screen_Map.md); for API contract see [API Spec](./Late_Add_V2_API_Spec.md) and [late-add-api/docs/](./late-add-api/docs/).
+Front-end structure for the Windex admin UI. For screens and flows see [Screen Map](./Windex_Screen_Map.md); for API contract see [API Spec](./Windex_API_Spec.md) and [late-add-api/docs/](./late-add-api/docs/).
 
 ---
 
@@ -8,17 +8,17 @@ Front-end structure for the Late Add admin UI. For screens and flows see [Screen
 
 - **Admin-focused interface** — For league admins who manage groups, seasons, events, and standings (points ingestion, attribution, correction, aggregation).
 - **Manage groups, seasons, events, standings** — Create and edit groups and seasons; view and manage events (rounds); view points-only standings.
-- **Product requirement:** Late Add v2 must support: (1) **API-ingested results** from external apps such as Scorekeeper or 18Birdies; (2) **Manual round entry** as a first-class workflow; (3) **Round edit / override / correction** by an admin. The UI cannot be limited to passive review; it must support operational round creation and correction.
+- **Product requirement:** Windex must support: (1) **API-ingested results** from external apps such as Scorekeeper or 18Birdies; (2) **Manual round entry** as a first-class workflow; (3) **Round edit / override / correction** by an admin. The UI cannot be limited to passive review; it must support operational round creation and correction.
 - **Three ways events enter** — All converge into the same canonical event/result model in the backend. No separate "manual-only" data model; source labeling and input workflow only.
 - **Resolve attribution conflicts** — Surface events that cannot be assigned cleanly to group/season; support resolution (choose canonical, merge, or reject).
-- **Resolve player mapping** — Map source-player identities to canonical Late Add players.
+- **Resolve player mapping** — Map source-player identities to canonical Windex players.
 - **Operational, not passive** — The UI supports active round creation and correction, not only review of ingested data.
 
 ---
 
 ## 2. Application Structure
 
-Main UI areas (aligned with [Screen Map](./Late_Add_V2_Screen_Map.md)):
+Main UI areas (aligned with [Screen Map](./Windex_Screen_Map.md)):
 
 | Area | Purpose |
 |------|---------|
@@ -27,7 +27,7 @@ Main UI areas (aligned with [Screen Map](./Late_Add_V2_Screen_Map.md)):
 | **Round entry** | Manual creation of a round (group, season, date, players, scores); first-class flow at e.g. `/events/new`. |
 | **Round edit / override** | Correct or override an existing round; entry from event detail; route e.g. `/events/:eventId/edit`. |
 | **Attribution review** | Queue of unresolved attribution items; list + detail; admin selects group/season and submits resolution. |
-| **Player mapping** | Queue of unmapped source players; list + detail; admin maps to Late Add player and confirms. |
+| **Player mapping** | Queue of unmapped source players; list + detail; admin maps to Windex player and confirms. |
 | **Standings** | Group + Season selectors; read-only points-only standings from API. |
 | **Groups** | List and manage groups (and sections if used). |
 | **Seasons** | List and manage seasons per group. |
@@ -88,7 +88,7 @@ Visual design matches Late Add v1 (Glide): olive green headers (#4B5E2A), white 
 | **Retrieve standings** | GET standings by group/season; display as returned; no client-side aggregation. |
 | **Retrieve groups, seasons, events** | GET list/detail for groups, seasons, league_rounds (events); use for lists, detail views, filters. |
 | **Resolve attribution** | Use API endpoints for attribution resolution (accept/reject/merge) per late-add-api contract. |
-| **Resolve player mappings** | Map external player identifiers to Late Add player_id via supported API; refresh queues after resolution. |
+| **Resolve player mappings** | Map external player identifiers to Windex player_id via supported API; refresh queues after resolution. |
 
 All calls use **Bearer JWT** (Supabase Auth). Full contract in [late-add-api/docs/](./late-add-api/docs/).
 
@@ -102,7 +102,7 @@ UI → API → Canonical Event → Attribution → Results → Points → Standi
 
 - **UI** submits or inspects data only via the API. Manual entry and ingested rounds both produce the same canonical event/result model.
 - **API** validates and persists; aggregates standings from stored points. Round edit/override flows through the API; the client does not simulate aggregation.
-- **Standings** are always computed on the backend from stored event results; the UI never computes them locally. Late Add does not compute golf competition formats (e.g. Stableford, match play); it stores and aggregates point totals.
+- **Standings** are always computed on the backend from stored event results; the UI never computes them locally. Windex does not compute golf competition formats (e.g. Stableford, match play); it stores and aggregates point totals.
 
 ---
 
@@ -152,6 +152,6 @@ Use a shared error state component and consistent messaging.
 ## References
 
 - [README](./README.md) — Overview, terminology.
-- [Screen Map](./Late_Add_V2_Screen_Map.md) — Screens and flows.
-- [API Spec](./Late_Add_V2_API_Spec.md) — Endpoints and shapes.
-- [Data Model](./Late_Add_V2_Data_Model.md) — Entities and schema.
+- [Screen Map](./Windex_Screen_Map.md) — Screens and flows.
+- [API Spec](./Windex_API_Spec.md) — Endpoints and shapes.
+- [Data Model](./Windex_Data_Model.md) — Entities and schema.

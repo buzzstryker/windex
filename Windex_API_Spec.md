@@ -1,4 +1,4 @@
-# Late Add v2 — API Spec
+# Windex — API Spec
 
 Endpoints, request/response shapes, auth, and errors for late-add-api. Full contract, validation rules, and error codes: [late-add-api/docs/api.md](./late-add-api/docs/api.md). For terms (Group, Season, Event, Result, Standings, Source app, Attribution) see [README — Terminology](./README.md#terminology).
 
@@ -24,7 +24,7 @@ Details (request/response shapes, validation, error codes): see **late-add-api/*
 
 ## Types (request / response)
 
-- Ingest: `scores[]` with `player_id`, `score_value` (points) or `result_type` (win/loss/tie). Points are determined by the source or admin; Late Add stores and aggregates them and does not compute golf competition formats.
+- Ingest: `scores[]` with `player_id`, `score_value` (points) or `result_type` (win/loss/tie). Points are determined by the source or admin; Windex stores and aggregates them and does not compute golf competition formats.
 - Standings: `{ standings: [ { season_id, group_id, player_id, rounds_played, total_points } ] }`.
 - Payment requests: `{ league_round_id, requests: [ { from_player_id, to_player_id, amount_cents } ] }`.
 - Points analysis (head-to-head): `{ player_a, player_b, lifetime: { rounds_together, net_points, player_a_wins, player_b_wins, ties }, by_season: [ { season_name, rounds_together, net_points, rounds: [ { round_date, player_a_points, player_b_points, net } ] } ] }`.
@@ -34,7 +34,7 @@ All points analysis and matrix computation is **server-side** in Edge Functions.
 
 ## References
 
-- [Master Spec](./Late_Add_V2_Master_Spec.md)
-- [Data Model](./Late_Add_V2_Data_Model.md)
+- [Master Spec](./Windex_Master_Spec.md)
+- [Data Model](./Windex_Data_Model.md)
 - [bootstrap-late-add-api.md](./bootstrap-late-add-api.md) (first endpoints)
 - [late-add-api/docs/](./late-add-api/docs/) — full API contract, settlement and payout design, backlog

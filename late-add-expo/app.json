@@ -1,17 +1,19 @@
 {
   "expo": {
-    "name": "late-add-v2",
-    "slug": "late-add-v2",
+    "name": "Windex",
+    "slug": "windex",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "lateaddv2",
+    "scheme": "windex",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.buzzstryker.windex"
     },
     "android": {
+      "package": "com.buzzstryker.windex",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -24,8 +26,8 @@
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png",
-      "name": "Late Add",
-      "shortName": "Late Add"
+      "name": "Windex",
+      "shortName": "Windex"
     },
     "plugins": [
       "expo-router",

@@ -1,9 +1,9 @@
 /**
- * POST each round from glide-import/ to Late Add v2 ingest-event-results.
+ * POST each round from glide-import/ to Windex ingest-event-results.
  *
  * Prereqs:
  *   1. Run: npm run glide:convert path/to/file.ods --group-id=<id> --season-id=<id>
- *   2. Create group and season in Late Add v2 (or use seed group-seed-001, season-seed-001)
+ *   2. Create group and season in Windex (or use seed group-seed-001, season-seed-001)
  *   3. Set env: SUPABASE_URL, GLIDE_IMPORT_TOKEN (Bearer JWT) or use test user sign-in
  *
  * Usage: node scripts/run-glide-import.mjs [--dry-run]

@@ -1,8 +1,8 @@
 # API
 
-**Architectural boundary:** Late Add v2 operates as a **points ledger + standings aggregation platform**. It ingests or accepts **final point totals per player** (from external apps, manual admin entry, or admin override). It does **not** compute golf competition formats (Stableford, match play, best ball, skins, etc.); external systems or human admins determine points. Late Add stores, maps, attributes, corrects, audits, and aggregates those points. Standings are **always derived** from atomic point records in the ledger; they are never edited directly.
+**Architectural boundary:** Windex operates as a **points ledger + standings aggregation platform**. It ingests or accepts **final point totals per player** (from external apps, manual admin entry, or admin override). It does **not** compute golf competition formats (Stableford, match play, best ball, skins, etc.); external systems or human admins determine points. Windex stores, maps, attributes, corrects, audits, and aggregates those points. Standings are **always derived** from atomic point records in the ledger; they are never edited directly.
 
-**Terminology — “score” means points awarded only.** In Late Add v2, “score” always refers to **awarded points** (the value stored and aggregated for standings). Late Add does **not** ingest or process: gross golf scores, net scores, hole-by-hole scores, scorecards, birdies/pars/strokes, or any golf scorecard math. It only accepts **final awarded point totals** per player per event.
+**Terminology — “score” means points awarded only.** In Windex, “score” always refers to **awarded points** (the value stored and aggregated for standings). Windex does **not** ingest or process: gross golf scores, net scores, hole-by-hole scores, scorecards, birdies/pars/strokes, or any golf scorecard math. It only accepts **final awarded point totals** per player per event.
 
 ## Points ledger and standings
 
@@ -38,7 +38,7 @@
 
 **POST** `/ingest-event-results`
 
-Creates one league round and its ledger rows (one per player: awarded points only). Auth required (Bearer JWT). Supports resolving source-player identities to canonical `player_id` via `player_mappings` and enqueueing unresolved identities to `player_mapping_queue`. Late Add does not ingest golf scorecard data; only final point totals per player.
+Creates one league round and its ledger rows (one per player: awarded points only). Auth required (Bearer JWT). Supports resolving source-player identities to canonical `player_id` via `player_mappings` and enqueueing unresolved identities to `player_mapping_queue`. Windex does not ingest golf scorecard data; only final point totals per player.
 
 **Request body**
 
@@ -90,9 +90,9 @@ Each point row must have either a **canonical** `player_id` or a **source identi
 
 ### Domain rules (business logic)
 
-- **Points only — no golf scorecard data** — Late Add stores **awarded point totals** only. It does not ingest or compute: gross/net golf scores, hole-by-hole scores, scorecards, or stroke counts. Each group has a `scoring_mode`:
+- **Points only — no golf scorecard data** — Windex stores **awarded point totals** only. It does not ingest or compute: gross/net golf scores, hole-by-hole scores, scorecards, or stroke counts. Each group has a `scoring_mode`:
   - **points**: `score_value` (or `score_override`) must be in the allowed points range (e.g. -10 to +10). Values that look like stroke counts (e.g. 72, 75) are rejected with **400** and `code: "raw_stroke_score_rejected"`. Out-of-range points return **400** and `code: "points_out_of_range"`.
-  - **win_loss_override**: each entry must include `result_type`: `"win"`, `"loss"`, or `"tie"`. The API accepts this input and stores equivalent points (win=1, loss=0, tie=0.5) in `score_value` for aggregation; `result_type` is stored on `league_scores`. The outcome is determined by the source or admin; Late Add does not compute match-play or other format logic.
+  - **win_loss_override**: each entry must include `result_type`: `"win"`, `"loss"`, or `"tie"`. The API accepts this input and stores equivalent points (win=1, loss=0, tie=0.5) in `score_value` for aggregation; `result_type` is stored on `league_scores`. The outcome is determined by the source or admin; Windex does not compute match-play or other format logic.
 - **Event structure** — A season belongs to exactly one group. If `season_id` is provided, it must belong to the same `group_id`; otherwise **400** and `code: "season_group_mismatch"`.
 - **Attribution** — When `season_id` is omitted or null, the round is stored with `attribution_status = 'pending_attribution'` and appears in the attribution review queue. When `season_id` is provided and valid, `attribution_status = 'attributed'`. The ingest contract **requires** `group_id`; the narrowest support for pending attribution is “missing season” only. To support events with no group yet would require a schema/contract change (e.g. nullable `group_id` or placeholder group).
 - **Override** — When `score_override` is set for a point row, `override_actor` and `override_reason` are required; the server sets `override_at`. Otherwise **400** and `code: "override_metadata_required"`.
@@ -450,7 +450,7 @@ Round-scoped: computes and writes `league_scores.money_delta` for one round only
 
 **POST** `/generate-payment-requests`
 
-Round-scoped: reads `league_scores.money_delta` for one round and returns the minimal set of payer → payee requests. **Does not write to the database**; requests are generated on demand and not stored. Late Add does not track payment completion or maintain a settlement ledger.
+Round-scoped: reads `league_scores.money_delta` for one round and returns the minimal set of payer → payee requests. **Does not write to the database**; requests are generated on demand and not stored. Windex does not track payment completion or maintain a settlement ledger.
 
 **Request body**
 
@@ -524,7 +524,7 @@ Requires `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` from the Supabase D
 - win_loss_override: `result_type` win/loss/tie accepted and stored as points (1/0/0.5); standings from event results.
 - Multi-group: one result per group; player can be in multiple groups; no cross-group ambiguity in standings.
 - Payout: no config (dollars_per_point NULL) → computed: false; with config → computed: true, zero-sum; standings remain points-only.
-- Payment requests: generate-payment-requests reads money_delta, validates zero-sum in cents, returns minimal payer→payee list; not persisted; Late Add does not track payment completion.
+- Payment requests: generate-payment-requests reads money_delta, validates zero-sum in cents, returns minimal payer→payee list; not persisted; Windex does not track payment completion.
 
 ---
 

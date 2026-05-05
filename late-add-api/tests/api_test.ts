@@ -10,7 +10,7 @@ function ok(name: string, cond: boolean, detail?: string) {
 }
 
 async function runTests() {
-  console.log("Late Add backend — local API tests\n");
+  console.log("Windex backend — local API tests\n");
   let passed = 0;
   let failed = 0;
 

@@ -35,4 +35,4 @@ late-add-api/
 
 ## References
 
-- Schema and API: **docs/** in this folder; product docs and data model in the parent Late Add v2 directory (../*.md).
+- Schema and API: **docs/** in this folder; product docs and data model in the parent Windex directory (../*.md).

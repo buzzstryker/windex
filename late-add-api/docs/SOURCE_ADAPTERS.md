@@ -1,6 +1,6 @@
 # Source Adapters
 
-Source adapters convert **external point totals** (from Scorekeeper, 18Birdies, Golf Genius CSV, or generic CSV) into the **ingest-event-results** API format. Late Add v2 does **not** ingest golf scorecard data (gross/net scores, hole-by-hole, strokes, birdies/pars). It only accepts **final awarded point totals** per player per event. Adapters do not compute points or apply golf rules; they normalize structure and identity so the pipeline can ingest rounds end-to-end.
+Source adapters convert **external point totals** (from Scorekeeper, 18Birdies, Golf Genius CSV, or generic CSV) into the **ingest-event-results** API format. Windex does **not** ingest golf scorecard data (gross/net scores, hole-by-hole, strokes, birdies/pars). It only accepts **final awarded point totals** per player per event. Adapters do not compute points or apply golf rules; they normalize structure and identity so the pipeline can ingest rounds end-to-end.
 
 ---
 
@@ -28,7 +28,7 @@ Each element of `scores`:
 
 | Field               | Type   | Required | Description |
 |---------------------|--------|----------|-------------|
-| `player_id`         | string | No*      | Canonical Late Add player_id when already known. |
+| `player_id`         | string | No*      | Canonical Windex player_id when already known. |
 | `source_player_ref` | string | No*      | Stable id from the external system (preferred when available). |
 | `source_player_name` | string | No*     | Display name from the external system. |
 | `points`            | number | Yes      | **Awarded points** for the round (final point total from the source; not golf strokes or scorecard data). |
@@ -109,9 +109,9 @@ Requires deployed functions on Supabase Cloud (same as main integration test) an
 
 ---
 
-## Glide ODS import (Late Add v2)
+## Glide ODS import (Windex)
 
-To import a **Glide app export** (`.ods` from Glide) into Late Add v2 (all Glide fields have a place; see **[GLIDE_IMPORT_FIELD_MAPPING.md](./GLIDE_IMPORT_FIELD_MAPPING.md)**):
+To import a **Glide app export** (`.ods` from Glide) into Windex (all Glide fields have a place; see **[GLIDE_IMPORT_FIELD_MAPPING.md](./GLIDE_IMPORT_FIELD_MAPPING.md)**):
 
 1. **Optional but recommended:** Sync structure so sections, groups, and seasons exist with the same IDs as in Glide:
    ```bash
@@ -144,7 +144,7 @@ To import a **Glide app export** (`.ods` from Glide) into Late Add v2 (all Glide
 
 ## Constraints
 
-- **Points only:** Late Add does not ingest or process golf scorecard data (gross/net scores, hole-by-hole, strokes, birdies/pars). Adapters assume the source provides **final awarded point totals** per player only.
+- **Points only:** Windex does not ingest or process golf scorecard data (gross/net scores, hole-by-hole, strokes, birdies/pars). Adapters assume the source provides **final awarded point totals** per player only.
 - **No rules engine:** Adapters do not compute points, apply formats, or validate golf rules. External systems (or manual entry) supply final point totals.
-- **Backend as source of truth:** Resolution, queue, and standings are handled by the ingest API and existing Late Add v2 logic.
+- **Backend as source of truth:** Resolution, queue, and standings are handled by the ingest API and existing Windex logic.
 - **Narrow responsibility:** Adapters only normalize data into the ingest API; they do not call the database or implement business rules.

@@ -1,4 +1,4 @@
-# Late Add v2 Admin UI — Implementation Summary
+# Windex Admin UI — Implementation Summary
 
 Summary of the first usable admin UI in **`late-add-admin/`** (Vite + React) in this directory. No backend or Scorekeeper app code was changed.
 
@@ -45,7 +45,7 @@ Summary of the first usable admin UI in **`late-add-admin/`** (Vite + React) in 
 - **Round entry** (`/events/new`) — Group (required), Season (optional), Played date (required), Source app `manual`, dynamic list of player_id + game_points; server computes score_value via head-to-head formula (`N × game_points - round_total`). Submit calls `POST /ingest-event-results`. Expo app: Add Round bottom sheet on Rounds tab with player chip selector.
 - **Round edit** (`/events/:eventId/edit`) — Played date, Season ID, results table (score_value, score_override); submit calls `PATCH /events/:eventId` (see backend gaps).
 - **Attribution resolution** — Inline on Attribution Review: Group ID (required), Season ID (optional); submit calls `POST /review/attribution/:id/resolve`.
-- **Player mapping resolution** — Inline on Player Mapping: Late Add player ID (required), optional suggestions; submit calls `POST /review/player-mapping/:id/resolve`.
+- **Player mapping resolution** — Inline on Player Mapping: Windex player ID (required), optional suggestions; submit calls `POST /review/player-mapping/:id/resolve`.
 
 ---
 
@@ -84,8 +84,8 @@ Recommendation: Add the above endpoints (or equivalent PostgREST usage) in late-
 
 ## 6. Documentation updates
 
-- **Late_Add_V2_Screen_Map.md** — Updated to state three ways events enter (API ingestion, manual entry, round edit/override); added Dashboard, Events, Event detail, Round entry, Round edit, Attribution review, Player mapping, Standings; normalized status values; added flows.
-- **Late_Add_V2_UI_Architecture.md** — Updated UI goals (manual entry and round override as first-class); application structure and routing; API interaction (manual creation, update); shared UI requirements and status design.
+- **Windex_Screen_Map.md** — Updated to state three ways events enter (API ingestion, manual entry, round edit/override); added Dashboard, Events, Event detail, Round entry, Round edit, Attribution review, Player mapping, Standings; normalized status values; added flows.
+- **Windex_UI_Architecture.md** — Updated UI goals (manual entry and round override as first-class); application structure and routing; API interaction (manual creation, update); shared UI requirements and status design.
 - **README.md** (this directory) — Noted that the first usable admin UI lives in `late-add-admin/` and supports API ingestion, manual round entry, and round edit/override.
 
 ---

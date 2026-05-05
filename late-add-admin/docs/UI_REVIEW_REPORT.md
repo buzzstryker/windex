@@ -1,4 +1,4 @@
-# Late Add v2 Admin UI — Review & Usability Pass
+# Windex Admin UI — Review & Usability Pass
 
 Structured review of operator workflows: manual round entry, event inspection/detail, round edit/override, player mapping, attribution review, standings. Goal: reduce friction, improve scanability, make exception states clear, keep actions deliberate—without expanding product scope or changing backend logic.
 
