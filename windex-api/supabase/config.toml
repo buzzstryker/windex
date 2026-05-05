@@ -35,6 +35,10 @@ additional_redirect_urls = [
   "https://app.lateaddgolf.com/**",
   "https://late-add-v2.vercel.app",
   "https://late-add-v2.vercel.app/**",
+  "https://windexgolf.com",
+  "https://windexgolf.com/**",
+  "https://www.windexgolf.com",
+  "https://www.windexgolf.com/**",
 ]
 jwt_expiry = 3600
 enable_refresh_token_rotation = true
@@ -50,7 +54,7 @@ otp_length = 6
 otp_expiry = 3600
 
 [auth.email.template.magic_link]
-subject = "Your Late Add login code"
+subject = "Your Windex login code"
 content_path = "./supabase/templates/otp.html"
 
 # Disable Supabase platform-level JWT verification for all Edge Functions.
