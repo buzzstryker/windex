@@ -50,6 +50,7 @@
 | Capability | Super Admin | Group Admin | Member |
 |------------|-------------|-------------|--------|
 | Create groups | Yes | No | No |
+| Delete groups | Yes (windex-admin `/groups/:id` Danger Zone) | No | No |
 | Assign group admins | Yes | No | No |
 | Promote users to super admin | Yes | No | No |
 | Add/edit/delete rounds — any group | Yes | No | No |

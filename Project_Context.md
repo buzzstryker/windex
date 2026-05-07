@@ -88,6 +88,93 @@ When drafting prompts for Claude Code, include verifications for these rules whe
 
 ---
 
+## Delete Capability Audit (resolved 2026-05-07)
+
+*Read-only audit performed 2026-05-07. Goal: determine what already exists for deleting a group or removing a player from a group, before designing any new delete UX. **Resolution implemented same day** — see "Resolution" at the bottom of this section.*
+
+### 1. windex-admin UI — current state
+
+| Surface | File | Delete capability? |
+|---|---|---|
+| `/groups` list | `windex-admin/src/pages/Groups.tsx` | **No.** Each row only has a "View seasons" link. No delete button, no row-level action menu. |
+| `/groups/:id` detail | `windex-admin/src/pages/GroupDetail.tsx` | **No "Delete Group" button.** Page renders the group name, a "Back to groups" link, and a list of seasons with per-season Standings links. Nothing else. |
+| `/players` (member management) | `windex-admin/src/pages/Players.tsx` + `src/api/playerAdmin.ts` | **No hard delete of `group_members`.** The "Edit" row lets an admin change `role` and toggle `is_active` (1 → 0 = soft delete), but the underlying `updateMembership()` call uses HTTP `PATCH` against `/rest/v1/group_members`. There is no `DELETE` path wired up. |
+
+The only `DELETE`-method `fetch` calls in the admin app are in `pages/Events.tsx` against `league_scores` and `league_rounds` (round deletion). No admin code path issues a `DELETE` against `groups` or `group_members`.
+
+### 2. Backend / schema — FK behavior
+
+All FK constraints were created in `windex-api/supabase/migrations/001_core_schema.sql` and have not been altered by any later migration (verified by grepping `REFERENCES` across all 19 migrations).
+
+| FK | Source → Target | ON DELETE |
+|---|---|---|
+| `group_members.group_id` | → `groups(id)` | **CASCADE** |
+| `seasons.group_id` | → `groups(id)` | **CASCADE** |
+| `league_rounds.group_id` | → `groups(id)` | **CASCADE** |
+| `league_rounds.season_id` | → `seasons(id)` | **SET NULL** |
+| `league_scores.league_round_id` | → `league_rounds(id)` | **CASCADE** |
+| `groups.section_id` | → `sections(id)` | **SET NULL** |
+| `groups.user_id` / `league_rounds.user_id` / `players.user_id` / `sections.user_id` | → `auth.users(id)` | CASCADE (irrelevant to per-group delete) |
+
+Implication: a plain `DELETE FROM groups WHERE id = ?` will, by FK cascade alone:
+
+- Delete all `group_members` for that group (cascade).
+- Delete all `seasons` for that group (cascade).
+- Delete all `league_rounds` for that group (cascade) → which in turn cascades to delete all `league_scores` for those rounds. **There is no direct FK from `league_scores` to `groups`; cleanup happens transitively via `league_rounds`.**
+- Set `seasons.section_id` references to NULL where applicable (n/a — `seasons` has no `section_id`; only `groups.section_id` does).
+
+What it will **not** clean up:
+
+- `players` — `group_members.player_id` and `league_scores.player_id` are plain `TEXT` columns with **no FK to `players`** (intentional per the comment at the top of `006_players.sql`: *"No FK from group_members/league_scores to keep scope narrow; player_id in those tables remains TEXT"*). Players whose only group membership was the deleted group will be orphaned-but-still-present.
+- `player_mappings` / `player_mapping_queue` — no FK to groups.
+
+### 3. Edge Function / RPC for cascading delete
+
+- **No `delete-group` Edge Function exists.** Inventory of `windex-api/supabase/functions/`: `admin-reset`, `compute-money-deltas`, `events`, `generate-payment-requests`, `get-points-analysis`, `get-points-matrix`, `get-standings`, `groups` (GET-only, lines 16–21 reject any non-GET method), `ingest-event-results`, `players`, `review`, `seasons`, `standings-player-history`. None delete a single group.
+- **No SQL function/RPC** for cascading group delete (no `CREATE FUNCTION ... delete_group` anywhere in migrations).
+- **`admin-reset`** (`functions/admin-reset/index.ts`) is the closest existing thing, but it is a **global wipe** — uses `SUPABASE_SERVICE_ROLE_KEY` to bypass RLS and clears every row from `league_scores`, `league_rounds`, `player_mapping_queue`, `player_mappings`, `group_members`, `players`, `seasons`, `groups`, `sections` in FK-safe order. Not per-group, and not safe for production use against a single league.
+- **A `DELETE FROM groups WHERE id = ?` from the admin client would therefore rely solely on FK cascade behavior** documented in §2. As a super-admin authenticated user, RLS would allow it (see §4), and FK cascades would clean up `group_members` / `seasons` / `league_rounds` / `league_scores`.
+
+### 4. RLS — super admin DELETE policies
+
+The brief said "should be from migration 3," but migration `003_scoring_mode_and_override.sql` only touches `league_scores` columns. The actual super-admin DELETE policies were introduced in **`015_rls_overhaul.sql`** (which uses helpers from `014_permissions.sql`: `am_i_super_admin()`, `am_i_group_admin(gid)`, `am_i_group_member(gid)`).
+
+Confirmed DELETE policies on the audit-relevant tables:
+
+| Table | Policy | `USING` clause |
+|---|---|---|
+| `groups` | `groups_delete` | `am_i_super_admin()` — **super admin only** |
+| `group_members` | `group_members_delete` | `am_i_super_admin() OR am_i_group_admin(group_id)` — super admin or that group's admin |
+| `seasons` | `seasons_delete` | `am_i_super_admin()` — super admin only |
+| `league_rounds` | `league_rounds_delete` | `am_i_super_admin() OR am_i_group_admin(group_id)` |
+| `league_scores` | `league_scores_delete` | super admin OR group admin of the round's group (via `EXISTS` join on `league_rounds`) |
+| `players` | `players_delete` | `am_i_super_admin()` |
+| `sections` | `sections_delete` | `am_i_super_admin()` |
+
+So both required policies (super admin DELETE on `groups` and on `group_members`) **do exist** — just in migration 015, not migration 3. RLS will not block a super admin from issuing `DELETE FROM groups WHERE id = ?` directly via PostgREST or the Supabase client.
+
+### Summary — what's missing if we want a "Delete Group" / "Remove Member" feature
+
+1. **No admin UI affordance** for either operation. UI work would be net-new on `Groups.tsx` / `GroupDetail.tsx` (group delete) and `Players.tsx` (member remove vs. existing soft-toggle).
+2. **No backend endpoint or RPC.** Two viable paths: (a) call `DELETE` directly via PostgREST and let FK cascades + RLS do the work, or (b) add an Edge Function for safety (confirm-by-name, audit log, orphan-player cleanup).
+3. **Orphan player risk.** Cascade deletes `group_members` rows but does not touch `players`. If a player exists in only one group, after delete they remain in `players` with no membership. Decide whether that's acceptable (it's the current implicit behavior of `admin-reset` reversed) or whether the delete flow should also prune zero-membership players.
+4. **`league_scores.player_id` and `group_members.player_id` are TEXT, not FK.** Any future "delete player" feature would need an explicit cleanup step; not relevant for group/member delete but worth flagging because related work on this surface will run into it.
+
+### Resolution — implemented 2026-05-07 (option 1: group-only delete, orphans left in place)
+
+A super-admin-only "Delete Group" capability was added to the admin UI on `/groups/:id`:
+
+- **Files modified / added**
+  - `windex-admin/src/components/ConfirmModal.tsx` *(new)* — generic destructive-action modal (Esc-to-cancel, backdrop-click-to-cancel, in-modal error surface).
+  - `windex-admin/src/api/groups.ts` — added `isCurrentUserSuperAdmin()` (calls the `am_i_super_admin()` RPC from migration `014_permissions.sql`), `getGroupDeleteCounts(groupId)` (parallel `Prefer: count=exact` queries on `group_members`, `seasons`, `league_rounds`, plus a derived `league_scores` count via `league_round_id=in.(...)`), and `deleteGroup(groupId)` (single `DELETE` against `/rest/v1/groups`).
+  - `windex-admin/src/pages/GroupDetail.tsx` — added a `DangerZone` section that renders only when `isCurrentUserSuperAdmin()` returns `true`. Click → modal showing the group name, the four cascade counts, the orphan-player caveat, and an irreversibility warning. Confirm → `DELETE` → navigate to `/groups` with a flash state.
+  - `windex-admin/src/pages/Groups.tsx` — reads `location.state.flash` once on mount and shows a `ConfirmToast`, then strips the state via `navigate(..., { replace: true })` so back/forward doesn't re-trigger the toast.
+
+- **Delete mechanics:** unchanged from the audit — a single `DELETE FROM groups WHERE id = ?` via PostgREST. FK `ON DELETE CASCADE` cleans up `group_members`, `seasons`, `league_rounds`, and (transitively via rounds) `league_scores`. RLS policy `groups_delete = am_i_super_admin()` from migration 015 gates the operation. **Player records are intentionally not touched** — orphans by design, surfaced in the modal copy.
+- **Not implemented:** member-removal hard-delete on `/players` (still soft-toggle of `is_active`); delete action on the `/groups` list page (detail-only per spec).
+
+---
+
 ## Recent changes / project log
 
 - **[2026-05-05] Renamed Late Add v2 → Windex** — code, config, UI strings, folder paths, GitHub repo. Domain stays `lateaddgolf.com` until a separate cutover session. Vercel project Root Directory updated to `windex-expo`. Bundle IDs added (`com.buzzstryker.windex`) for future native builds. Branch: `rename/late-add-to-windex`. Commits: `5623efd` (backend cleanup), `e68787b` (code/config), `0a5c2fe` (UI strings), `96195cf` (subfolder rename). PR #1 (squash-merged to master at `6afafe1`). Parent folder rename `Desktop\Projects\late-add-v2\` → `Desktop\Projects\windex\` deferred to post-session `rename-windex.bat` (Phase 8).

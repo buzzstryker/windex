@@ -1,18 +1,31 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { DataTable } from '../components/DataTable';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
+import { ConfirmToast } from '../components/ConfirmToast';
 import { listGroups } from '../api/groups';
 import type { Group } from '../types';
 
+interface FlashState { flash?: string }
+
 export function Groups() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const flash = (location.state as FlashState | null)?.flash ?? null;
+  const [toast, setToast] = useState<string | null>(flash);
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Consume the flash state once so the message doesn't reappear on back/forward.
+  useEffect(() => {
+    if (flash) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [flash, navigate, location.pathname]);
 
   const load = () => {
     setLoading(true);
@@ -56,6 +69,7 @@ export function Groups() {
           />
         )}
       </div>
+      {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} />}
     </>
   );
 }
