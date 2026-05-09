@@ -19,3 +19,6 @@ Thumbs.db
 .vercel
 .env*.local
 .claude/
+
+# Brand assets uploaded for in-chat image editing — not part of the codebase
+/windex-cup.png

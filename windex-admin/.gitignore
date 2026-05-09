@@ -1,0 +1,27 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Vite build output
+dist/
+
+# Vite cache
+.vite/
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# OS
+.DS_Store
+
+# local env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+.vercel
