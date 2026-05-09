@@ -3,7 +3,9 @@ import { PageHeader } from '../components/PageHeader';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
-import { listGroups } from '../api/groups';
+import { ConfirmToast } from '../components/ConfirmToast';
+import { AddPlayerModal } from '../components/AddPlayerModal';
+import { isCurrentUserSuperAdmin, listGroups } from '../api/groups';
 import {
   listPlayersWithMembership, updatePlayer, updateMembership,
   type PlayerWithMembership,
@@ -30,9 +32,13 @@ export function Players() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     listGroups().then(setGroups).catch(() => {});
+    isCurrentUserSuperAdmin().then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
   }, []);
 
   const load = useCallback(async () => {
@@ -90,14 +96,48 @@ export function Players() {
       <PageHeader title="Players" subtitle="View and manage player data by group." />
 
       <div className="card">
-        <div className="form-section" style={{ maxWidth: 300 }}>
-          <label htmlFor="pl-group">Group</label>
-          <select id="pl-group" value={groupId} onChange={(e) => { setGroupId(e.target.value); setEditingId(null); }}>
-            <option value="">Select group...</option>
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div className="form-section" style={{ maxWidth: 300, marginBottom: 0 }}>
+            <label htmlFor="pl-group">Group</label>
+            <select id="pl-group" value={groupId} onChange={(e) => { setGroupId(e.target.value); setEditingId(null); }}>
+              <option value="">Select group...</option>
+              {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>
+          {isSuperAdmin && (
+            <button
+              className="btn btn-primary"
+              onClick={() => { setSaveMsg(null); setAddOpen(true); }}
+              style={{ padding: '8px 14px' }}
+            >
+              + Add Player
+            </button>
+          )}
         </div>
       </div>
+
+      {isSuperAdmin && (
+        <AddPlayerModal
+          open={addOpen}
+          groups={groups}
+          onClose={() => setAddOpen(false)}
+          onSuccess={(result) => {
+            setAddOpen(false);
+            const lines = [`Player ${result.player.display_name} created`];
+            if (result.invite_sent) {
+              lines.push(`Invite sent to ${result.player.email ?? ''}`);
+            } else if (result.already_had_auth) {
+              lines.push('Auth account already existed; linked or will auto-link on next sign-in');
+            }
+            setToast(lines.join(' — '));
+            // Refresh members if a group is selected; otherwise the list stays empty
+            // (selection-driven page) and the new player will appear once selected.
+            if (groupId) load();
+          }}
+        />
+      )}
+
+      {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} duration={5000} />}
 
       {loading && <LoadingSpinner />}
       {error && <ErrorState message={error} onRetry={load} />}

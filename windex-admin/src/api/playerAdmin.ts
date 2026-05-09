@@ -1,4 +1,4 @@
-import { getAuthToken } from './client';
+import { apiFetch, ApiError, getAuthToken } from './client';
 
 const SUPABASE_URL = (
   typeof import.meta.env !== 'undefined' && import.meta.env.VITE_LATE_ADD_API_URL
@@ -110,5 +110,61 @@ export async function updateMembership(
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Failed to update membership: ${res.status} ${text}`);
+  }
+}
+
+// =============================================================================
+// invite-player Edge Function
+// =============================================================================
+
+export interface GroupAssignment {
+  group_id: string;
+  role: 'admin' | 'member';
+}
+
+export interface InvitePlayerInput {
+  display_name: string;
+  email: string;
+  send_invite: boolean;
+  group_assignments: GroupAssignment[];
+}
+
+export interface InvitePlayerResponse {
+  player: {
+    id: string;
+    display_name: string;
+    email: string | null;
+    user_id: string | null;
+    is_active: number;
+  };
+  groups_assigned: number;
+  invite_sent: boolean;
+  already_had_auth: boolean;
+}
+
+export class DuplicatePlayerEmailError extends Error {
+  constructor(public existingPlayerId: string) {
+    super('Player with this email already exists');
+    this.name = 'DuplicatePlayerEmailError';
+  }
+}
+
+/**
+ * Calls POST /invite-player. Translates the 409 duplicate-email response
+ * into a typed DuplicatePlayerEmailError so the UI can offer "view existing
+ * player" without parsing strings.
+ */
+export async function invitePlayer(input: InvitePlayerInput): Promise<InvitePlayerResponse> {
+  try {
+    return await apiFetch<InvitePlayerResponse>('/invite-player', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      const body = e.body as { existing_player_id?: string } | undefined;
+      if (body?.existing_player_id) throw new DuplicatePlayerEmailError(body.existing_player_id);
+    }
+    throw e;
   }
 }

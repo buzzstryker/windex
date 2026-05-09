@@ -89,3 +89,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.admin-reset]
 verify_jwt = false
+[functions.invite-player]
+verify_jwt = false
