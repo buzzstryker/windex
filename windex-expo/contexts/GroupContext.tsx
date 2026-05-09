@@ -17,7 +17,7 @@ type GroupWithSection = Group & { sectionName?: string };
 
 type GroupContextValue = {
   groups: GroupWithSection[];
-  /** Groups the current user is an active member of (alphabetical by name). */
+  /** Groups the current user is an active member of, sorted by group_members.joined_at ASC (earliest first). */
   myGroups: GroupWithSection[];
   sections: Section[];
   selectedGroup: GroupWithSection | null;
@@ -46,7 +46,9 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
   const [loading, setLoading] = useState(true);
-  const [myGroupIds, setMyGroupIds] = useState<Set<string>>(new Set());
+  // group_id → group_members.joined_at (ISO timestamp). Drives myGroups order
+  // and the default-group fallback chain.
+  const [myMembershipJoinedAt, setMyMembershipJoinedAt] = useState<Map<string, string>>(new Map());
 
   // Permissions
   const [dataVersion, setDataVersion] = useState(0);
@@ -62,14 +64,19 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
 
   const isGroupAdmin = useCallback((groupId: string) => adminGroupIds.has(groupId), [adminGroupIds]);
 
-  // Groups the user is an active member of, sorted alphabetically.
-  // Spec: would order by group_members.created_at, but that column does not
-  // exist on group_members (joined_at exists but is not exposed here yet) —
-  // so we fall back to alphabetical-by-name per the spec's fallback clause.
+  // Groups the user is an active member of, ordered by group_members.joined_at
+  // ASC (earliest membership first). The picker, the drawer's "My Groups"
+  // section, and the default-group fallback all read from this list.
   const myGroups = useMemo(() => {
-    const filtered = groups.filter((g) => myGroupIds.has(g.id));
-    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-  }, [groups, myGroupIds]);
+    const filtered = groups.filter((g) => myMembershipJoinedAt.has(g.id));
+    return [...filtered].sort((a, b) => {
+      const ja = myMembershipJoinedAt.get(a.id) ?? '';
+      const jb = myMembershipJoinedAt.get(b.id) ?? '';
+      // ISO-8601 sorts lexicographically; tie-break by name for stable order.
+      const cmp = ja.localeCompare(jb);
+      return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+    });
+  }, [groups, myMembershipJoinedAt]);
 
   // Load permissions after sign-in
   useEffect(() => {
@@ -77,7 +84,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       setIsSuperAdmin(false);
       setAdminGroupIds(new Set());
       setMyPlayerIds([]);
-      setMyGroupIds(new Set());
+      setMyMembershipJoinedAt(new Map());
       return;
     }
     (async () => {
@@ -98,20 +105,29 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
           setMyPlayerIds(ids);
 
           // Find my group memberships (active) — used by both the picker and drawer.
-          // Also identify which of those memberships are admin role.
+          // joined_at drives myGroups order; role identifies admin memberships.
           if (ids.length > 0) {
             const inList = ids.map((id) => `"${id}"`).join(',');
             const gmRes = await fetch(
-              `${base}/rest/v1/group_members?player_id=in.(${inList})&is_active=eq.1&select=group_id,role`,
+              `${base}/rest/v1/group_members?player_id=in.(${inList})&is_active=eq.1&select=group_id,role,joined_at`,
               { headers: { Authorization: `Bearer ${token}`, apikey: anonKey || token } }
             );
             if (gmRes.ok) {
-              const rows: { group_id: string; role: string }[] = await gmRes.json();
-              setMyGroupIds(new Set(rows.map((r) => r.group_id)));
+              const rows: { group_id: string; role: string; joined_at: string }[] = await gmRes.json();
+              // If a player has multiple membership rows for the same group_id
+              // (shouldn't happen given the UNIQUE constraint on (group_id,
+              // player_id), but the user can have multiple players), keep the
+              // earliest joined_at so myGroups reflects first-touch order.
+              const joinedAt = new Map<string, string>();
+              for (const r of rows) {
+                const prev = joinedAt.get(r.group_id);
+                if (!prev || r.joined_at.localeCompare(prev) < 0) joinedAt.set(r.group_id, r.joined_at);
+              }
+              setMyMembershipJoinedAt(joinedAt);
               setAdminGroupIds(new Set(rows.filter((r) => r.role === 'admin').map((r) => r.group_id)));
             }
           } else {
-            setMyGroupIds(new Set());
+            setMyMembershipJoinedAt(new Map());
             setAdminGroupIds(new Set());
           }
         }
@@ -135,12 +151,13 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
 
       // Auto-select default group:
       //   1. Persisted manual selection (per user_id) if still a valid membership.
-      //   2. Alphabetical first of the user's active group memberships.
-      //      (Spec preferred earliest group_members.created_at, but that column
-      //      does not exist — falling back per the spec's fallback clause.)
-      //   3. Alphabetical first of all visible groups (super admins / no membership).
+      //   2. Earliest-joined of the user's active group memberships
+      //      (group_members.joined_at ASC).
+      //   3. Earliest-joined overall — i.e. the group with the smallest
+      //      joined_at across all rows the user can see, used when the user
+      //      has no memberships (e.g. super admin browsing).
       if (!selectedGroup && enriched.length > 0) {
-        let memberGroupIds: Set<string> | null = null;
+        let memberJoinedAt: Map<string, string> | null = null;
         try {
           const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
           const token = await getStoredAccessToken();
@@ -155,24 +172,39 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
               if (ids.length > 0) {
                 const inList = ids.map((id) => `"${id}"`).join(',');
                 const gmRes = await fetch(
-                  `${base}/rest/v1/group_members?player_id=in.(${inList})&is_active=eq.1&select=group_id`,
+                  `${base}/rest/v1/group_members?player_id=in.(${inList})&is_active=eq.1&select=group_id,joined_at`,
                   { headers },
                 );
                 if (gmRes.ok) {
-                  const rows: { group_id: string }[] = await gmRes.json();
-                  memberGroupIds = new Set(rows.map((r) => r.group_id));
+                  const rows: { group_id: string; joined_at: string }[] = await gmRes.json();
+                  memberJoinedAt = new Map();
+                  for (const r of rows) {
+                    const prev = memberJoinedAt.get(r.group_id);
+                    if (!prev || r.joined_at.localeCompare(prev) < 0) memberJoinedAt.set(r.group_id, r.joined_at);
+                  }
                 }
               }
             }
           }
         } catch {
-          // silent — we'll just fall through to the alphabetical defaults
+          // silent — we'll fall through to the alphabetical-by-name tie-break
+          // inside the comparator below
         }
 
-        const alphaAll = [...enriched].sort((a, b) => a.name.localeCompare(b.name));
-        const alphaMine = memberGroupIds
-          ? alphaAll.filter((grp) => memberGroupIds!.has(grp.id))
+        const cmpName = (a: GroupWithSection, b: GroupWithSection) => a.name.localeCompare(b.name);
+        const earliestMine = memberJoinedAt
+          ? [...enriched]
+              .filter((grp) => memberJoinedAt!.has(grp.id))
+              .sort((a, b) => {
+                const cmp = (memberJoinedAt!.get(a.id) ?? '').localeCompare(memberJoinedAt!.get(b.id) ?? '');
+                return cmp !== 0 ? cmp : cmpName(a, b);
+              })
           : [];
+        // For "earliest overall" we don't have joined_at for every group
+        // (only for memberships). For the no-membership case (super admin /
+        // brand-new user), fall back to alphabetical — there's no join row
+        // to read order from.
+        const earliestAll = [...enriched].sort(cmpName);
 
         // 1. Persisted manual selection wins.
         let chosen: GroupWithSection | undefined;
@@ -183,7 +215,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
               const candidate = enriched.find((grp) => grp.id === persisted);
               // Honor persisted choice if it's still a member group, or if the
               // user has no memberships at all (e.g. super admin).
-              if (candidate && (!memberGroupIds || memberGroupIds.has(candidate.id) || memberGroupIds.size === 0)) {
+              if (candidate && (!memberJoinedAt || memberJoinedAt.has(candidate.id) || memberJoinedAt.size === 0)) {
                 chosen = candidate;
               }
             }
@@ -192,10 +224,10 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // 2. Alphabetical first of my groups.
-        if (!chosen) chosen = alphaMine[0];
-        // 3. Alphabetical first overall.
-        if (!chosen) chosen = alphaAll[0];
+        // 2. Earliest-joined of my groups.
+        if (!chosen) chosen = earliestMine[0];
+        // 3. Earliest-joined overall (alphabetical fallback — see above).
+        if (!chosen) chosen = earliestAll[0];
 
         if (chosen) setSelectedGroup(chosen);
       }
