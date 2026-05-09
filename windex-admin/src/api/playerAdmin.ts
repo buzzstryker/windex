@@ -76,13 +76,20 @@ export async function listPlayersWithMembership(groupId: string): Promise<Player
     .sort((a, b) => a.display_name.localeCompare(b.display_name));
 }
 
+/**
+ * PATCH a players row by id. Permissions are enforced by RLS
+ * (`players_update` in migration 015): super admin can update any row,
+ * the owning auth user can update their own. The previous client-side
+ * `user_id=eq.<currentUserId>` filter was redundant defense that became
+ * harmful after migration 020 made `user_id` nullable — pending players
+ * with `user_id IS NULL` would silently fail to update.
+ */
 export async function updatePlayer(
   playerId: string,
-  userId: string,
   updates: Partial<Pick<PlayerDetail, 'display_name' | 'full_name' | 'email' | 'venmo_handle' | 'is_active'>>
 ): Promise<void> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/players?id=eq.${encodeURIComponent(playerId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    `${SUPABASE_URL}/rest/v1/players?id=eq.${encodeURIComponent(playerId)}`,
     {
       method: 'PATCH',
       headers: headers({ Prefer: 'return=minimal' }),

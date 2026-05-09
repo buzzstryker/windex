@@ -2,7 +2,7 @@
 
 - ~~**Manual linking after each Glide import:**~~ **Obsolete — Glide imports are retired** (one-time launch migration, complete). New player onboarding is exclusively via the unified Add Player flow on `windex-admin/Players.tsx` (`+ Add Player` button → `invite-player` Edge Function), which also auto-links the auth user via the `link_player_on_auth_signup` trigger added in migration 020 (2026-05-09). The `windex-api/scripts/sync-glide-members.mjs` and friends are kept for historical reference only.
 
-- **Pre-existing Players.tsx edit bug (low priority):** The `EditRow` save path calls `updatePlayer(p.id, getCurrentUserId(), …)` which builds a PostgREST WHERE clause `id=eq.<player>&user_id=eq.<currentUserId>`. After migration 020 made `players.user_id` nullable, any newly-created player row that hasn't signed in yet has `user_id IS NULL` and won't match this WHERE clause — so the EditRow PATCH would silently no-op for those players. RLS still permits the update (super admin can update any row), so the fix is to drop the `user_id=eq.…` predicate from `updatePlayer` and rely on RLS for the gate. Out of scope for the Add Player PR; flagged for a follow-up.
+- ~~**Pre-existing Players.tsx edit bug (low priority):**~~ **Done 2026-05-09.** `updatePlayer()` now PATCHes by `id` only and relies on RLS (`players_update`: super admin OR owning user) for permissions. The `userId` parameter was removed from the function signature; the sole call site in `Players.tsx#handleSave` was updated to match.
 
 - **Future access-control review:** Evaluate whether round-level actions should authorize by `league_rounds.user_id` or by group-based permissions derived from membership/role in the associated group.
 

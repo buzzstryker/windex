@@ -65,12 +65,14 @@ export function Players() {
     role: string;
     is_active: number;
   }) => {
-    const userId = getCurrentUserId();
-    if (!userId) { setSaveMsg('Not signed in'); return; }
+    // Sign-in check: RLS still requires an authenticated session, but we no
+    // longer need the user_id for the PATCH WHERE clause — RLS handles the
+    // super-admin / owning-user gate.
+    if (!getCurrentUserId()) { setSaveMsg('Not signed in'); return; }
     setSaving(true);
     setSaveMsg(null);
     try {
-      await updatePlayer(p.id, userId, {
+      await updatePlayer(p.id, {
         display_name: fields.display_name,
         full_name: fields.full_name || null,
         email: fields.email || null,
