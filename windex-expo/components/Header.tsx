@@ -1,3 +1,4 @@
+import { ReactNode } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -5,7 +6,12 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 type HeaderProps = {
-  title: string;
+  /**
+   * Header title slot. Pass a string for the standard centered title,
+   * or a ReactNode (e.g. <GroupPicker tabName="…" />) when the centered
+   * element is a composite (tab name + picker affordance).
+   */
+  title: string | ReactNode;
   onMenuPress?: () => void;
 };
 
@@ -25,9 +31,13 @@ export function Header({ title, onMenuPress }: HeaderProps) {
           </View>
         </TouchableOpacity>
 
-        <Text style={[styles.title, { color: colors.headerText }]} numberOfLines={1}>
-          {title}
-        </Text>
+        {typeof title === 'string' ? (
+          <Text style={[styles.title, { color: colors.headerText }]} numberOfLines={1}>
+            {title}
+          </Text>
+        ) : (
+          <View style={styles.titleSlot}>{title}</View>
+        )}
 
         {/* Spacer to keep title centered */}
         <View style={styles.menuButton} />
@@ -69,5 +79,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     flex: 1,
+  },
+  titleSlot: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Bound the row so a long group name truncates instead of pushing the
+    // hamburger off-screen.
+    minWidth: 0,
   },
 });

@@ -262,9 +262,7 @@ export default function StandingsScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <Header title="Standings" onMenuPress={openDrawer} />
-
-      <GroupPicker />
+      <Header title={<GroupPicker tabName="Standings" />} onMenuPress={openDrawer} />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}

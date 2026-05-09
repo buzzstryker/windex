@@ -132,9 +132,7 @@ export default function RoundsScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <Header title="Rounds" onMenuPress={openDrawer} />
-
-      <GroupPicker />
+      <Header title={<GroupPicker tabName="Rounds" />} onMenuPress={openDrawer} />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}

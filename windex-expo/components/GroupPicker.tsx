@@ -18,43 +18,63 @@ import type { Group } from '@/lib/api';
 const OLIVE = '#4B5E2A';
 
 /**
- * Phone-only viewport breakpoint. Above this width, the picker doesn't render
- * at all (group switching is in the drawer on desktop).
+ * Phone-only viewport breakpoint. Above this width, the picker collapses
+ * to just the tab name (group switching is in the drawer on desktop).
  */
 const PHONE_BREAKPOINT_PX = 768;
 
 type GroupWithSection = Group & { sectionName?: string };
 
+type Props = {
+  /** Tab name shown to the left of the picker affordance (e.g. "Standings"). */
+  tabName: string;
+};
+
 /**
- * GroupPicker — phone-only header dropdown for switching among the user's
- * group memberships. Renders nothing on viewports >= 768px.
+ * GroupPicker — the centered title on the Standings/Rounds/Analysis tab
+ * headers. Always renders the tab name; on phone viewports it appends the
+ * selected group with a dropdown chevron (or a separator for single-group
+ * users). Designed to live inside `<Header title={…} />`.
  *
- * • If the user is a member of one group, renders the name as static text.
- * • If multiple, renders a tappable dropdown opening a modal list.
- * • Selecting updates GroupContext (drawer stays in sync via shared state).
+ * Tap target: the entire combined unit (tab name + chevron + group name) is
+ * pressable on phone multi-group, not just the chevron — easier to hit and
+ * matches typical dropdown UX.
  */
-export function GroupPicker() {
+export function GroupPicker({ tabName }: Props) {
   const { width } = useWindowDimensions();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const headerText = colors.headerText;
   const insets = useSafeAreaInsets();
   const { myGroups, selectedGroup, selectGroup } = useGroup();
   const [pickerVisible, setPickerVisible] = useState(false);
 
-  // Hide entirely on tablet/desktop viewports.
-  if (width >= PHONE_BREAKPOINT_PX) return null;
+  const isPhone = width < PHONE_BREAKPOINT_PX;
 
-  // Nothing to show until groups load or if the user has none.
-  if (myGroups.length === 0) return null;
+  // Desktop, or no membership signal yet — render just the tab name centered.
+  if (!isPhone || myGroups.length === 0) {
+    return (
+      <Text style={[styles.tabName, { color: headerText }]} numberOfLines={1}>
+        {tabName}
+      </Text>
+    );
+  }
 
-  const currentName = selectedGroup?.name ?? myGroups[0].name;
+  const groupName = selectedGroup?.name ?? myGroups[0].name;
 
-  // Single-membership: static text, no dropdown affordance.
+  // Single membership — render "Tab · Group" as static text, no affordance.
   if (myGroups.length === 1) {
     return (
-      <View style={styles.staticWrap}>
-        <Text style={[styles.label, { color: colors.text }]} numberOfLines={1}>
-          {currentName}
+      <View style={styles.row}>
+        <Text style={[styles.tabName, { color: headerText }]} numberOfLines={1}>
+          {tabName}
+        </Text>
+        <Text style={[styles.separator, { color: headerText }]}>·</Text>
+        <Text
+          style={[styles.groupName, { color: headerText }]}
+          numberOfLines={1}
+        >
+          {groupName}
         </Text>
       </View>
     );
@@ -65,19 +85,26 @@ export function GroupPicker() {
     setPickerVisible(false);
   };
 
+  // Multi-membership — full pressable: "Tab ▾ Group".
   return (
     <>
       <Pressable
-        style={styles.button}
+        style={styles.row}
         onPress={() => setPickerVisible(true)}
         accessibilityRole="button"
-        accessibilityLabel={`Select group, current: ${currentName}`}
+        accessibilityLabel={`${tabName}, group ${groupName}. Tap to switch group.`}
         hitSlop={8}
       >
-        <Text style={[styles.label, { color: colors.text }]} numberOfLines={1}>
-          {currentName}
+        <Text style={[styles.tabName, { color: headerText }]} numberOfLines={1}>
+          {tabName}
         </Text>
-        <Text style={[styles.chevron, { color: colors.text }]}>{'▾'}</Text>
+        <Text style={[styles.chevron, { color: headerText }]}>{'▾'}</Text>
+        <Text
+          style={[styles.groupName, { color: headerText }]}
+          numberOfLines={1}
+        >
+          {groupName}
+        </Text>
       </Pressable>
 
       <Modal visible={pickerVisible} animationType="slide" transparent>
@@ -97,10 +124,10 @@ export function GroupPicker() {
                 const isSel = selectedGroup?.id === item.id;
                 return (
                   <Pressable
-                    style={[styles.row, isSel && styles.rowSelected]}
+                    style={[styles.modalRow, isSel && styles.modalRowSelected]}
                     onPress={() => handleSelect(item)}
                   >
-                    <Text style={[styles.rowName, isSel && { color: OLIVE }]} numberOfLines={1}>
+                    <Text style={[styles.modalRowName, isSel && { color: OLIVE }]} numberOfLines={1}>
                       {item.name}
                     </Text>
                     {isSel ? <Text style={styles.checkmark}>{'✓'}</Text> : null}
@@ -117,36 +144,47 @@ export function GroupPicker() {
 }
 
 const styles = StyleSheet.create({
-  button: {
+  // Pressable / static row inside the Header's centered title slot.
+  // alignSelf:'center' + flexShrink keeps it visually centered while still
+  // allowing the long-text branch (groupName) to truncate within the slot.
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    minHeight: 44, // iOS HIG minimum touch target
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(75, 94, 42, 0.08)',
-    gap: 6,
-    maxWidth: '100%',
+    minHeight: 44, // iOS HIG touch target
+    paddingHorizontal: 4,
+    flexShrink: 1,
+    minWidth: 0,
   },
-  staticWrap: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  label: {
+  tabName: {
     fontSize: 17,
     fontWeight: '600',
-    flexShrink: 1,
+    flexShrink: 0,
   },
   chevron: {
-    fontSize: 12,
-    opacity: 0.7,
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.8,
+    marginHorizontal: 4,
+    flexShrink: 0,
+  },
+  separator: {
+    fontSize: 17,
+    fontWeight: '600',
+    opacity: 0.6,
+    marginHorizontal: 6,
+    flexShrink: 0,
+  },
+  // Subordinated to the tab name with a slight opacity drop. Truncates with
+  // ellipsis when the combined unit gets too wide for the centered slot.
+  groupName: {
+    fontSize: 17,
+    fontWeight: '500',
+    opacity: 0.85,
+    flexShrink: 1,
+    minWidth: 0,
   },
 
+  // Modal styling matches the previous picker's bottom-sheet look.
   modalWrap: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -176,7 +214,7 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     padding: 4,
   },
-  row: {
+  modalRow: {
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 48,
@@ -185,10 +223,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 2,
   },
-  rowSelected: {
+  modalRowSelected: {
     backgroundColor: '#F0F4E8',
   },
-  rowName: {
+  modalRowName: {
     flex: 1,
     fontSize: 16,
     fontWeight: '600',

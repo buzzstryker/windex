@@ -186,9 +186,7 @@ export default function AnalysisScreen() {
 
   return (
     <View style={styles.screen}>
-      <Header title="Analysis" onMenuPress={openDrawer} />
-
-      <GroupPicker />
+      <Header title={<GroupPicker tabName="Analysis" />} onMenuPress={openDrawer} />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}
