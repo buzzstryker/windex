@@ -11,7 +11,8 @@ import { useRouter } from 'expo-router';
 
 import { Header } from '@/components/Header';
 import { GroupBanner } from '@/components/GroupBanner';
-// GroupSelector removed — group selection now in hamburger drawer
+import { GroupPicker } from '@/components/GroupPicker';
+// GroupSelector removed — group selection now in hamburger drawer (desktop) or GroupPicker (phone)
 import { AddRoundModal } from '@/components/AddRoundModal';
 import { RoundCard } from '@/components/RoundCard';
 import { ThemedText } from '@/components/themed-text';
@@ -132,6 +133,8 @@ export default function RoundsScreen() {
   return (
     <ThemedView style={styles.screen}>
       <Header title="Rounds" onMenuPress={openDrawer} />
+
+      <GroupPicker />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}

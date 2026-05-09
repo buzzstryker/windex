@@ -8,6 +8,7 @@ import { authPersistence } from '@/lib/authPersistence';
 type AuthContextValue = {
   ready: boolean;
   signedIn: boolean;
+  userId: string | null;
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   sendOtp: (email: string) => Promise<{ error: string | null }>;
   verifyOtp: (email: string, token: string) => Promise<{ error: string | null }>;
@@ -33,6 +34,7 @@ function createSupabase(): SupabaseClient | null {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
   const supabase = useMemo(() => (hasSupabaseAuthConfig() ? createSupabase() : null), []);
   const readyRef = useRef(false);
   const signedInAtRef = useRef<number>(0);
@@ -58,6 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (cancelled) return;
           const hasToken = Boolean(session?.access_token);
           setSignedIn(hasToken);
+          setUserId(session?.user?.id ?? null);
           if (hasToken) signedInAtRef.current = Date.now();
           if (!readyRef.current) {
             readyRef.current = true;
@@ -120,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
     setSignedIn(false);
+    setUserId(null);
   }, [supabase]);
 
   // Auto-sign-out on server 401 (expired/invalid JWT).
@@ -136,8 +140,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [signOut]);
 
   const value = useMemo(
-    () => ({ ready, signedIn, signInWithPassword, sendOtp, verifyOtp, signOut }),
-    [ready, signedIn, signInWithPassword, sendOtp, verifyOtp, signOut]
+    () => ({ ready, signedIn, userId, signInWithPassword, sendOtp, verifyOtp, signOut }),
+    [ready, signedIn, userId, signInWithPassword, sendOtp, verifyOtp, signOut]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

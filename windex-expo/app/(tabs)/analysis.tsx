@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Header } from '@/components/Header';
 import { GroupBanner } from '@/components/GroupBanner';
+import { GroupPicker } from '@/components/GroupPicker';
 import { Colors } from '@/constants/theme';
 import { useDrawer } from '@/contexts/DrawerContext';
 import { useGroup } from '@/contexts/GroupContext';
@@ -186,6 +187,8 @@ export default function AnalysisScreen() {
   return (
     <View style={styles.screen}>
       <Header title="Analysis" onMenuPress={openDrawer} />
+
+      <GroupPicker />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}

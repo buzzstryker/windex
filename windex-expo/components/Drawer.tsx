@@ -28,24 +28,21 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { groups, selectedGroup, selectGroup, myPlayerIds } = useGroup();
+  const { groups, myGroups, selectedGroup, selectGroup, isSuperAdmin } = useGroup();
 
   const sheetBg = colorScheme === 'dark' ? colors.card : '#FFFFFF';
   const textColor = colors.text;
   const mutedColor = colors.icon;
 
-  // Split groups into My Groups (member) and Other Groups
-  // A group is "mine" if any of my player IDs appear in that group's members
-  // Since we don't have membership per group here, use a simpler heuristic:
-  // check if the group has data associated with the current user.
-  // For now, all groups are visible since the user owns all data.
-  // We'll mark groups where the user has a group_member entry.
-  // The GroupContext already fetches adminGroupIds — let's use groups list directly.
-  // My groups = groups where myPlayerIds has a member (we need to fetch this).
-  // Simplification: show all groups as "My Groups" for now since the logged-in user
-  // created all groups. We can refine later with actual membership lookup.
-  const myGroups = groups; // All groups are accessible
-  const otherGroups: GroupWithSection[] = []; // None for now
+  // Single source of truth: myGroups comes from GroupContext (active group_members
+  // rows for the current user, alphabetical). The phone GroupPicker uses the same
+  // list, so picker and drawer stay in sync.
+  // Super admins additionally see "Other Groups" — every group they're not a
+  // member of — so they can still browse the org from the drawer.
+  const myGroupIds = new Set(myGroups.map((g) => g.id));
+  const otherGroups: GroupWithSection[] = isSuperAdmin
+    ? [...groups].filter((g) => !myGroupIds.has(g.id)).sort((a, b) => a.name.localeCompare(b.name))
+    : [];
 
   const handleGroupSelect = (g: GroupWithSection) => {
     selectGroup(g);

@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 
 import { Header } from '@/components/Header';
 import { GroupBanner } from '@/components/GroupBanner';
+import { GroupPicker } from '@/components/GroupPicker';
 import { HistoryChart } from '@/components/HistoryChart';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -262,6 +263,8 @@ export default function StandingsScreen() {
   return (
     <ThemedView style={styles.screen}>
       <Header title="Standings" onMenuPress={openDrawer} />
+
+      <GroupPicker />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}

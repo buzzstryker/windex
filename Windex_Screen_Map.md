@@ -21,7 +21,7 @@ Windex supports events (rounds) from three paths. All converge into the same can
 ## App entry and navigation
 
 - **Dashboard** — Top-level entry; summary cards and recent rounds; links to Rounds, Attribution Review, Player Mapping, Standings. Dev tools: Reset & Import Glide Data, Import New Rounds.
-- **Expo app (windex-expo) tab bar** — 3 tabs: Standings, Rounds, Analysis. Olive green headers with tab name only. Hamburger drawer for group selection (My Groups / Other Groups with logo thumbnails + checkmark), Group Details, Sign out.
+- **Expo app (windex-expo) tab bar** — 3 tabs: Standings, Rounds, Analysis. Olive green headers with tab name only. Hamburger drawer for group selection (My Groups / Other Groups with logo thumbnails + checkmark), Group Details, Sign out. **Phone viewports (`< 768px`) additionally show a `<GroupPicker />` dropdown directly below the header on all three tabs.** It scopes to the user's active `group_members` rows (alphabetical), persists manual selection per `user_id`, and renders as static text when the user is in only one group. The picker is absent on tablet/desktop — group switching there continues via the drawer. Both surfaces share `GroupContext.myGroups` and stay in sync.
 - **Admin web UI (windex-admin) nav** — Dashboard, Rounds, Round Entry, Standings, Groups, Players, Points Analysis, Attribution Review, Player Mapping.
 - **Round-centric** — Round detail links to Edit/Override, Attribution Review, and Player Mapping where relevant.
 

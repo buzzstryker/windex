@@ -1,9 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   listGroups,
   listSeasons,
   listSections,
-  listEvents,
   getStoredAccessToken,
   seasonLabel as getSeasonLabel,
   type Group,
@@ -12,11 +11,14 @@ import {
 } from '@/lib/api';
 import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { useAuth } from '@/contexts/AuthContext';
+import { selectedGroupKey, userPrefs } from '@/lib/userPrefs';
 
 type GroupWithSection = Group & { sectionName?: string };
 
 type GroupContextValue = {
   groups: GroupWithSection[];
+  /** Groups the current user is an active member of (alphabetical by name). */
+  myGroups: GroupWithSection[];
   sections: Section[];
   selectedGroup: GroupWithSection | null;
   selectedSeason: Season | null;
@@ -37,13 +39,14 @@ type GroupContextValue = {
 const GroupContext = createContext<GroupContextValue | null>(null);
 
 export function GroupProvider({ children }: { children: React.ReactNode }) {
-  const { signedIn, ready } = useAuth();
+  const { signedIn, ready, userId } = useAuth();
   const [groups, setGroups] = useState<GroupWithSection[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<GroupWithSection | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
   const [loading, setLoading] = useState(true);
+  const [myGroupIds, setMyGroupIds] = useState<Set<string>>(new Set());
 
   // Permissions
   const [dataVersion, setDataVersion] = useState(0);
@@ -59,12 +62,22 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
 
   const isGroupAdmin = useCallback((groupId: string) => adminGroupIds.has(groupId), [adminGroupIds]);
 
+  // Groups the user is an active member of, sorted alphabetically.
+  // Spec: would order by group_members.created_at, but that column does not
+  // exist on group_members (joined_at exists but is not exposed here yet) —
+  // so we fall back to alphabetical-by-name per the spec's fallback clause.
+  const myGroups = useMemo(() => {
+    const filtered = groups.filter((g) => myGroupIds.has(g.id));
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  }, [groups, myGroupIds]);
+
   // Load permissions after sign-in
   useEffect(() => {
     if (!ready || !signedIn) {
       setIsSuperAdmin(false);
       setAdminGroupIds(new Set());
       setMyPlayerIds([]);
+      setMyGroupIds(new Set());
       return;
     }
     (async () => {
@@ -84,17 +97,22 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
           const ids: string[] = await pidRes.json();
           setMyPlayerIds(ids);
 
-          // Find which groups I'm admin of
+          // Find my group memberships (active) — used by both the picker and drawer.
+          // Also identify which of those memberships are admin role.
           if (ids.length > 0) {
             const inList = ids.map((id) => `"${id}"`).join(',');
             const gmRes = await fetch(
-              `${base}/rest/v1/group_members?player_id=in.(${inList})&role=eq.admin&select=group_id`,
+              `${base}/rest/v1/group_members?player_id=in.(${inList})&is_active=eq.1&select=group_id,role`,
               { headers: { Authorization: `Bearer ${token}`, apikey: anonKey || token } }
             );
             if (gmRes.ok) {
-              const rows: { group_id: string }[] = await gmRes.json();
-              setAdminGroupIds(new Set(rows.map((r) => r.group_id)));
+              const rows: { group_id: string; role: string }[] = await gmRes.json();
+              setMyGroupIds(new Set(rows.map((r) => r.group_id)));
+              setAdminGroupIds(new Set(rows.filter((r) => r.role === 'admin').map((r) => r.group_id)));
             }
+          } else {
+            setMyGroupIds(new Set());
+            setAdminGroupIds(new Set());
           }
         }
       } catch {
@@ -115,9 +133,14 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       setGroups(enriched);
       setSections(s);
 
-      // Auto-select: find the group the player most recently played in
+      // Auto-select default group:
+      //   1. Persisted manual selection (per user_id) if still a valid membership.
+      //   2. Alphabetical first of the user's active group memberships.
+      //      (Spec preferred earliest group_members.created_at, but that column
+      //      does not exist — falling back per the spec's fallback clause.)
+      //   3. Alphabetical first of all visible groups (super admins / no membership).
       if (!selectedGroup && enriched.length > 0) {
-        let myGroupIds: Set<string> | null = null;
+        let memberGroupIds: Set<string> | null = null;
         try {
           const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
           const token = await getStoredAccessToken();
@@ -137,44 +160,51 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
                 );
                 if (gmRes.ok) {
                   const rows: { group_id: string }[] = await gmRes.json();
-                  myGroupIds = new Set(rows.map((r) => r.group_id));
+                  memberGroupIds = new Set(rows.map((r) => r.group_id));
                 }
               }
             }
           }
-
-          // Find most recent round, preferring groups the player belongs to
-          const events = await listEvents({});
-          if (events.length > 0) {
-            const sorted = [...events].sort((a, b) => b.round_date.localeCompare(a.round_date));
-            // Prefer a round from a group the player is in
-            const myEvent = myGroupIds
-              ? sorted.find((e) => myGroupIds!.has(e.group_id))
-              : null;
-            const bestGroupId = myEvent?.group_id ?? sorted[0].group_id;
-            const match = enriched.find((grp) => grp.id === bestGroupId);
-            setSelectedGroup(match ?? enriched[0]);
-          } else {
-            // No events — pick first group the player belongs to
-            const myGroup = myGroupIds
-              ? enriched.find((g) => myGroupIds!.has(g.id))
-              : null;
-            setSelectedGroup(myGroup ?? enriched[0]);
-          }
         } catch {
-          // Even if events fetch fails, prefer a group the player belongs to
-          const fallback = myGroupIds
-            ? enriched.find((g) => myGroupIds!.has(g.id))
-            : null;
-          setSelectedGroup(fallback ?? enriched[0]);
+          // silent — we'll just fall through to the alphabetical defaults
         }
+
+        const alphaAll = [...enriched].sort((a, b) => a.name.localeCompare(b.name));
+        const alphaMine = memberGroupIds
+          ? alphaAll.filter((grp) => memberGroupIds!.has(grp.id))
+          : [];
+
+        // 1. Persisted manual selection wins.
+        let chosen: GroupWithSection | undefined;
+        if (userId) {
+          try {
+            const persisted = await userPrefs.getItem(selectedGroupKey(userId));
+            if (persisted) {
+              const candidate = enriched.find((grp) => grp.id === persisted);
+              // Honor persisted choice if it's still a member group, or if the
+              // user has no memberships at all (e.g. super admin).
+              if (candidate && (!memberGroupIds || memberGroupIds.has(candidate.id) || memberGroupIds.size === 0)) {
+                chosen = candidate;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        // 2. Alphabetical first of my groups.
+        if (!chosen) chosen = alphaMine[0];
+        // 3. Alphabetical first overall.
+        if (!chosen) chosen = alphaAll[0];
+
+        if (chosen) setSelectedGroup(chosen);
       }
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load seasons when group changes
   useEffect(() => {
@@ -223,7 +253,11 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   const selectGroup = useCallback((group: GroupWithSection) => {
     setSelectedGroup(group);
     setSelectedSeason(null); // will be resolved by the useEffect above
-  }, []);
+    // Persist manual selection per user_id so it survives reloads.
+    if (userId) {
+      void userPrefs.setItem(selectedGroupKey(userId), group.id);
+    }
+  }, [userId]);
 
   const selectSeason = useCallback((season: Season) => {
     setSelectedSeason(season);
@@ -233,6 +267,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
     <GroupContext.Provider
       value={{
         groups,
+        myGroups,
         sections,
         selectedGroup,
         selectedSeason,
