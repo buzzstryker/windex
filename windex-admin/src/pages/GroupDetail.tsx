@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { DataTable } from '../components/DataTable';
@@ -6,6 +6,8 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { ConfirmToast } from '../components/ConfirmToast';
+import { CreateSeasonModal } from '../components/CreateSeasonModal';
 import {
   listGroups,
   listSeasons,
@@ -25,6 +27,19 @@ export function GroupDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [createSeasonOpen, setCreateSeasonOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const reloadSeasons = useCallback(async () => {
+    if (!groupId) return;
+    try {
+      const s = await listSeasons(groupId);
+      setSeasons(s);
+    } catch (e) {
+      // soft-fail — leave existing seasons in place
+      console.warn('Failed to reload seasons:', e);
+    }
+  }, [groupId]);
 
   useEffect(() => {
     if (!groupId) return;
@@ -70,13 +85,40 @@ export function GroupDetail() {
         <p style={{ marginBottom: 12 }}>
           <Link to="/groups">← Back to groups</Link>
         </p>
-        <h2>Seasons</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h2 style={{ margin: 0 }}>Seasons</h2>
+          {isSuperAdmin && group && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setCreateSeasonOpen(true)}
+              style={{ padding: '6px 12px', fontSize: 13 }}
+            >
+              + Create Season
+            </button>
+          )}
+        </div>
         {seasons.length === 0 ? (
           <EmptyState message="No seasons for this group yet." />
         ) : (
           <DataTable columns={columns} data={seasons} getRowKey={(r) => r.id} />
         )}
       </div>
+
+      {isSuperAdmin && group && (
+        <CreateSeasonModal
+          open={createSeasonOpen}
+          group={group}
+          existingSeasons={seasons}
+          onClose={() => setCreateSeasonOpen(false)}
+          onSuccess={(s) => {
+            setCreateSeasonOpen(false);
+            setToast(`Season ${seasonLabel(s)} created (${s.start_date} → ${s.end_date})`);
+            reloadSeasons();
+          }}
+        />
+      )}
+
+      {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} duration={5000} />}
 
       {isSuperAdmin && group && (
         <DangerZone

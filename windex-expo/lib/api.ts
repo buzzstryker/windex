@@ -221,7 +221,18 @@ export async function listSeasons(groupId: string): Promise<Season[]> {
     const data = await apiFetch<{ seasons?: Season[] }>(
       `/seasons?group_id=${encodeURIComponent(groupId)}`
     );
-    return data.seasons ?? [];
+    const all = data.seasons ?? [];
+    // Hide future-dated seasons from the user-facing picker. The auto-rollover
+    // job (migration 021) creates the next season ahead of time — sometimes
+    // months early — so it sits dormant until its start_date arrives. Showing
+    // it in the picker would let users select a season that hasn't started,
+    // and would also trip GroupContext's auto-select fallback (which prefers
+    // latest start_date when no current-as-of-today season is found).
+    // windex-admin uses its own /seasons consumer (in src/api/groups.ts) and
+    // intentionally keeps the unfiltered list so super admins can verify
+    // newly-created future rows on GroupDetail.
+    const today = new Date().toISOString().slice(0, 10);
+    return all.filter((s) => !s.start_date || s.start_date <= today);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return [];
     throw e;

@@ -143,6 +143,76 @@ export async function getGroupDeleteCounts(groupId: string): Promise<GroupDelete
 }
 
 /**
+ * Read groups.season_start_month directly via PostgREST. The /groups Edge
+ * Function doesn't return this column, but the Create Season form needs it
+ * to default the start_date intelligently. Returns null if the group is
+ * missing or the column is null/0 ("no schedule").
+ */
+export async function getGroupSeasonStartMonth(groupId: string): Promise<number | null> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/groups?id=eq.${encodeURIComponent(groupId)}&select=season_start_month`,
+    { headers: restHeaders() }
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Failed to read season_start_month (${res.status}): ${body}`);
+  }
+  const rows: { season_start_month: number | null }[] = await res.json();
+  if (rows.length === 0) return null;
+  const v = rows[0].season_start_month;
+  if (v === null || v === 0) return null;
+  return v;
+}
+
+/**
+ * Insert a season row directly via PostgREST. RLS policy `seasons_insert`
+ * (migration 015) requires the caller to be a super admin or a group admin
+ * for the target group. Returns the inserted row.
+ *
+ * id pattern matches `ensure_next_season_for_group` in migration 021:
+ * `sn_<sanitized_group_id>_<endYear>`. Sanitization mirrors the SQL
+ * `regexp_replace([^a-zA-Z0-9_-], '_')`.
+ */
+export interface CreateSeasonInput {
+  group_id: string;
+  start_date: string; // 'YYYY-MM-DD'
+  end_date: string;   // 'YYYY-MM-DD'
+}
+
+export interface CreateSeasonResult {
+  id: string;
+  group_id: string;
+  start_date: string;
+  end_date: string;
+}
+
+export async function createSeason(input: CreateSeasonInput): Promise<CreateSeasonResult> {
+  const safeGroupId = input.group_id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const endYear = input.end_date.slice(0, 4);
+  const id = `sn_${safeGroupId}_${endYear}`;
+  const body = {
+    id,
+    group_id: input.group_id,
+    start_date: input.start_date,
+    end_date: input.end_date,
+  };
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/seasons`, {
+    method: 'POST',
+    headers: restHeaders({ Prefer: 'return=representation' }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let parsed: { message?: string; details?: string } | null = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* keep raw */ }
+    const msg = parsed?.message ?? parsed?.details ?? text ?? `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  const rows: CreateSeasonResult[] = await res.json();
+  return rows[0];
+}
+
+/**
  * Hard delete of a group. Relies on FK ON DELETE CASCADE for group_members,
  * seasons, league_rounds (and transitively league_scores via league_rounds).
  * Players are intentionally not cleaned up — orphans are left in place.

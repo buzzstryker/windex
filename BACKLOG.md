@@ -1,5 +1,7 @@
 # Windex — Backlog
 
+- **Leap-year drift in season-rollover dates (low priority, cosmetic):** `ensure_next_season_for_group()` (migration 021) computes `next_end = next_start + INTERVAL '1 year' - INTERVAL '1 day'`. When `next_start` is March 1 of a year following a leap year (or any date crossing a Feb-29 boundary), Postgres `+ INTERVAL '1 year'` truncates to the last valid day of February, which makes the resulting `end_date` drift back one day. For golf league seasons this is invisible — Windex Cup's Dec-Nov and YC Windex's Sept-Aug never cross Feb-29 in their start_date. Flagged in case Windex ever picks up a group whose start_date IS in March, in which case we'd want to switch to month-based arithmetic instead.
+
 - ~~**Manual linking after each Glide import:**~~ **Obsolete — Glide imports are retired** (one-time launch migration, complete). New player onboarding is exclusively via the unified Add Player flow on `windex-admin/Players.tsx` (`+ Add Player` button → `invite-player` Edge Function), which also auto-links the auth user via the `link_player_on_auth_signup` trigger added in migration 020 (2026-05-09). The `windex-api/scripts/sync-glide-members.mjs` and friends are kept for historical reference only.
 
 - ~~**Pre-existing Players.tsx edit bug (low priority):**~~ **Done 2026-05-09.** `updatePlayer()` now PATCHes by `id` only and relies on RLS (`players_update`: super admin OR owning user) for permissions. The `userId` parameter was removed from the function signature; the sole call site in `Players.tsx#handleSave` was updated to match.
