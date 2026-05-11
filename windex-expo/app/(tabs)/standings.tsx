@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -28,6 +28,7 @@ import {
   getStandings,
   type StandingRow,
 } from '@/lib/api';
+import { logUserEvent } from '@/lib/userEvents';
 
 const OLIVE = '#4B5E2A';
 const ALL_TIME = '__ALL_TIME__';
@@ -64,7 +65,23 @@ export default function StandingsScreen() {
     loading: groupLoading,
     reload,
     dataVersion,
+    myPlayerIds,
   } = useGroup();
+
+  // Log view_leaderboard on initial mount and whenever the selected group
+  // or season changes. Read myPlayerIds via a ref so the effect doesn't
+  // re-fire when the player_id cache resolves a beat after sign-in.
+  const myPlayerIdsRef = useRef(myPlayerIds);
+  myPlayerIdsRef.current = myPlayerIds;
+  useEffect(() => {
+    if (selectedGroup && selectedSeason) {
+      void logUserEvent('view_leaderboard', {
+        groupId: selectedGroup.id,
+        seasonId: selectedSeason.id,
+        playerId: myPlayerIdsRef.current[0] ?? null,
+      });
+    }
+  }, [selectedGroup?.id, selectedSeason?.id]);
 
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [loadingStandings, setLoadingStandings] = useState(false);

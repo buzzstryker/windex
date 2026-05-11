@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -27,6 +27,7 @@ import {
   type EventSummary,
 } from '@/lib/api';
 import { fetchRoundScores, type RoundScores } from '@/lib/roundScores';
+import { logUserEvent } from '@/lib/userEvents';
 
 export default function RoundsScreen() {
   const colorScheme = useColorScheme();
@@ -35,7 +36,22 @@ export default function RoundsScreen() {
   const router = useRouter();
   const { openDrawer } = useDrawer();
 
-  const { selectedGroup, selectedSeason, seasonLabel, reload, dataVersion, invalidateData, isSelectedSeasonActive, isSuperAdmin, isGroupAdmin } = useGroup();
+  const { selectedGroup, selectedSeason, seasonLabel, reload, dataVersion, invalidateData, isSelectedSeasonActive, isSuperAdmin, isGroupAdmin, myPlayerIds } = useGroup();
+
+  // Log view_rounds_list on initial mount and whenever the selected group
+  // or season changes. Read myPlayerIds via a ref so the effect doesn't
+  // re-fire when the player_id cache resolves a beat after sign-in.
+  const myPlayerIdsRef = useRef(myPlayerIds);
+  myPlayerIdsRef.current = myPlayerIds;
+  useEffect(() => {
+    if (selectedGroup && selectedSeason) {
+      void logUserEvent('view_rounds_list', {
+        groupId: selectedGroup.id,
+        seasonId: selectedSeason.id,
+        playerId: myPlayerIdsRef.current[0] ?? null,
+      });
+    }
+  }, [selectedGroup?.id, selectedSeason?.id]);
 
   // Members can only add rounds to active seasons; admins can backfill past seasons
   const canAddRound = isSelectedSeasonActive || isSuperAdmin || (selectedGroup ? isGroupAdmin(selectedGroup.id) : false);

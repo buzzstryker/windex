@@ -12,6 +12,7 @@ import {
 import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { useAuth } from '@/contexts/AuthContext';
 import { selectedGroupKey, userPrefs } from '@/lib/userPrefs';
+import { logUserEvent } from '@/lib/userEvents';
 
 type GroupWithSection = Group & { sectionName?: string };
 
@@ -318,13 +319,27 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
   }, [selectedGroup?.id]);
 
   const selectGroup = useCallback((group: GroupWithSection) => {
+    // Capture the previous selection BEFORE the state update so the
+    // group_switch event has accurate from_group_id. The initial default-
+    // selection effect uses setSelectedGroup directly (not selectGroup), so
+    // this path is by construction user-initiated — but we still guard on
+    // prev existing + being a different id to avoid logging redundant
+    // "switches" if a UI ever re-selects the current group.
+    const prev = selectedGroup;
     setSelectedGroup(group);
     setSelectedSeason(null); // resolved by the seasons effect
     if (userId) {
       void userPrefs.setItem(selectedGroupKey(userId), group.id);
       setPersistedChoiceId(group.id);
     }
-  }, [userId]);
+    if (prev && prev.id !== group.id) {
+      void logUserEvent('group_switch', {
+        groupId: group.id,
+        playerId: myPlayerIds[0] ?? null,
+        metadata: { from_group_id: prev.id },
+      });
+    }
+  }, [userId, selectedGroup, myPlayerIds]);
 
   const selectSeason = useCallback((season: Season) => {
     setSelectedSeason(season);
