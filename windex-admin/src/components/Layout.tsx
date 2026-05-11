@@ -14,6 +14,7 @@ export function Layout() {
     { path: '/standings', label: 'Standings' },
     { path: '/groups', label: 'Groups' },
     { path: '/players', label: 'Players' },
+    { path: '/activity', label: 'App Activity' },
     { path: '/analytics/points', label: 'Points Analysis' },
     { path: '/review/attribution', label: 'Attribution review' },
     { path: '/review/player-mapping', label: 'Player Mapping' },

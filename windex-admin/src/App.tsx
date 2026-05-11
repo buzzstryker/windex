@@ -14,6 +14,8 @@ import { GroupDetail } from './pages/GroupDetail';
 import { Login } from './pages/Login';
 import { PointsAnalysis } from './pages/PointsAnalysis';
 import { Players } from './pages/Players';
+import { Activity } from './pages/Activity';
+import { PlayerActivityDetail } from './pages/PlayerActivityDetail';
 
 export default function App() {
   return (
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="groups/:groupId" element={<GroupDetail />} />
         <Route path="analytics/points" element={<PointsAnalysis />} />
         <Route path="players" element={<Players />} />
+        <Route path="activity" element={<Activity />} />
+        <Route path="activity/:playerId" element={<PlayerActivityDetail />} />
       </Route>
     </Routes>
   );
