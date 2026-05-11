@@ -21,8 +21,10 @@ import {
   listEvents,
   getStandings,
   getActiveMemberCount,
+  getPlayerNames,
   seasonLabel,
   type Group,
+  type PlayerNames,
   type Season,
   type StandingRow,
 } from '@/lib/api';
@@ -35,7 +37,9 @@ type GroupDetail = Group & {
 type SeasonInfo = {
   season: Season;
   eventCount: number;
-  champion?: { name: string; points: number } | null;
+  /** Auto-computed points-standings winner (first row of getStandings).
+   *  player_id is resolved through the page's playerNames map to render full_name. */
+  pointsWinner?: { player_id: string; points: number } | null;
 };
 
 export default function GroupDetailScreen() {
@@ -49,6 +53,7 @@ export default function GroupDetailScreen() {
   const [sectionName, setSectionName] = useState<string | null>(null);
   const [activeMemberCount, setActiveMemberCount] = useState<number | null>(null);
   const [seasonInfos, setSeasonInfos] = useState<SeasonInfo[]>([]);
+  const [playerNames, setPlayerNames] = useState<Map<string, PlayerNames>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,12 +91,15 @@ export default function GroupDetailScreen() {
           (b.start_date ?? '').localeCompare(a.start_date ?? '')
         );
 
-        // For each season, get event count and champion
+        // For each season, get event count and auto-computed points winner
+        // (we keep player_id only; full_name is resolved through the batched
+        // players lookup below so both the Points Winner and Cup Champion
+        // rows render the same name field).
         const infos: SeasonInfo[] = [];
         for (const s of sorted) {
           if (cancelled) return;
           let eventCount = 0;
-          let champion: { name: string; points: number } | null = null;
+          let pointsWinner: { player_id: string; points: number } | null = null;
           try {
             const events = await listEvents({ group_id: id, season_id: s.id });
             eventCount = events.length;
@@ -101,18 +109,35 @@ export default function GroupDetailScreen() {
           try {
             const standings = await getStandings(s.id, id);
             if (standings.length > 0) {
-              champion = {
-                name: standings[0].player_name ?? standings[0].player_id.slice(0, 8),
+              pointsWinner = {
+                player_id: standings[0].player_id,
                 points: standings[0].total_points,
               };
             }
           } catch {
             // ignore
           }
-          infos.push({ season: s, eventCount, champion });
+          infos.push({ season: s, eventCount, pointsWinner });
         }
 
-        if (!cancelled) setSeasonInfos(infos);
+        if (cancelled) return;
+        setSeasonInfos(infos);
+
+        // Resolve full_name for both cup champions and points winners in one
+        // batched lookup against /rest/v1/players.
+        const idsToLookup = new Set<string>();
+        for (const s of sorted) {
+          if (s.cup_champion_player_id) idsToLookup.add(s.cup_champion_player_id);
+        }
+        for (const info of infos) {
+          if (info.pointsWinner) idsToLookup.add(info.pointsWinner.player_id);
+        }
+        if (idsToLookup.size > 0) {
+          const names = await getPlayerNames(Array.from(idsToLookup));
+          if (!cancelled) setPlayerNames(names);
+        } else {
+          if (!cancelled) setPlayerNames(new Map());
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
       } finally {
@@ -256,23 +281,37 @@ export default function GroupDetailScreen() {
           {previousSeasons.length > 0 ? (
             <View style={styles.sectionContainer}>
               <Text style={styles.sectionTitle}>Previous Seasons</Text>
-              {previousSeasons.map((si) => (
-                <View key={si.season.id} style={styles.prevSeasonCard}>
-                  {si.champion ? (
-                    <View style={styles.championRow}>
-                      <Text style={styles.championEmoji}>{'\uD83C\uDFC6'}</Text>
-                      <Text style={styles.championName}>{si.champion.name}</Text>
-                      <Text style={styles.championPts}>{si.champion.points} pts</Text>
+              {previousSeasons.map((si) => {
+                const resolveName = (pid: string | null | undefined): string | null => {
+                  if (!pid) return null;
+                  const rec = playerNames.get(pid);
+                  return rec?.full_name ?? rec?.display_name ?? pid.slice(0, 8);
+                };
+                const cupChampionName = resolveName(si.season.cup_champion_player_id);
+                const pointsWinnerName = si.pointsWinner ? resolveName(si.pointsWinner.player_id) : null;
+                return (
+                  <View key={si.season.id} style={styles.prevSeasonCard}>
+                    <Text style={styles.prevSeasonYear}>{seasonLabel(si.season)}</Text>
+                    <View style={styles.prevSeasonRows}>
+                      <View style={styles.prevSeasonRow}>
+                        <Text style={styles.prevSeasonLabel}>Cup Champion: </Text>
+                        <Text style={cupChampionName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
+                          {cupChampionName ?? '\u2014'}
+                        </Text>
+                      </View>
+                      <View style={styles.prevSeasonRow}>
+                        <Text style={styles.prevSeasonLabel}>Points Winner: </Text>
+                        <Text style={pointsWinnerName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
+                          {pointsWinnerName ?? '\u2014'}
+                        </Text>
+                        {si.pointsWinner ? (
+                          <Text style={styles.prevSeasonPts}>{si.pointsWinner.points}</Text>
+                        ) : null}
+                      </View>
                     </View>
-                  ) : null}
-                  <Text style={styles.prevSeasonName}>
-                    {seasonLabel(si.season)}
-                  </Text>
-                  <Text style={styles.prevSeasonDate}>
-                    {formatDateRange(si.season)}
-                  </Text>
-                </View>
-              ))}
+                  </View>
+                );
+              })}
             </View>
           ) : null}
         </ScrollView>
@@ -479,37 +518,47 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E0E0E0',
-    padding: 16,
+    padding: 14,
     marginBottom: 10,
-  },
-  championRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
+    alignItems: 'flex-start',
   },
-  championEmoji: {
-    fontSize: 18,
-    marginRight: 6,
+  prevSeasonYear: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginRight: 12,
+    // Reserve enough horizontal space that the two right-side rows align
+    // at the same x regardless of year-text width (3 vs 4 digits).
+    minWidth: 44,
   },
-  championName: {
-    fontSize: 15,
+  prevSeasonRows: {
+    flex: 1,
+  },
+  prevSeasonRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 2,
+  },
+  prevSeasonLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  prevSeasonName: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#1A1A1A',
     flex: 1,
   },
-  championPts: {
+  prevSeasonNameEmpty: {
     fontSize: 14,
+    color: '#9E9E9E',
+    flex: 1,
+  },
+  prevSeasonPts: {
+    fontSize: 13,
     fontWeight: '600',
     color: OLIVE,
-  },
-  prevSeasonName: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#1A1A1A',
-    marginBottom: 2,
-  },
-  prevSeasonDate: {
-    fontSize: 13,
-    color: '#8E8E93',
+    marginLeft: 8,
   },
 });

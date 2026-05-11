@@ -101,6 +101,10 @@ export interface Season {
   name?: string;
   start_date: string;
   end_date: string;
+  /** Manually-recorded Cup Champion (migration 025). NULL on current/future/legacy seasons. */
+  cup_champion_player_id?: string | null;
+  /** Optional free-text note explaining how the champion was decided (migration 025). */
+  cup_champion_notes?: string | null;
 }
 
 /**

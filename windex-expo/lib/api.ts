@@ -77,6 +77,10 @@ export type Season = {
   name: string | null;
   start_date: string;
   end_date: string;
+  /** Manually-recorded Cup Champion (migration 025). NULL on current/future/legacy seasons. */
+  cup_champion_player_id?: string | null;
+  /** Optional free-text note explaining how the champion was decided (migration 025). */
+  cup_champion_notes?: string | null;
 };
 
 export async function listGroups(): Promise<Group[]> {
@@ -214,6 +218,44 @@ export async function updateMembershipRest(membershipId: string, updates: Record
     }
   );
   return res.ok;
+}
+
+export type PlayerNames = {
+  display_name: string;
+  full_name: string | null;
+};
+
+/**
+ * Resolve a set of player IDs to their display_name + full_name via
+ * PostgREST. Returns a Map keyed by player_id. IDs that don't resolve
+ * (deleted player, RLS blocks the row, etc.) are simply absent from the
+ * map — callers should fall back to a placeholder like "—".
+ *
+ * Used by the GroupDetail screen to render the manually-recorded Cup
+ * Champion AND the auto-computed Points Winner on each past-season card.
+ * Both surfaces render `full_name`. Fire-and-forget on failure; returns
+ * an empty map rather than throwing so a missing player never blocks the
+ * rest of the page render.
+ */
+export async function getPlayerNames(playerIds: string[]): Promise<Map<string, PlayerNames>> {
+  const unique = Array.from(new Set(playerIds.filter((id): id is string => !!id)));
+  if (unique.length === 0) return new Map();
+  const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
+  const token = await getAccessToken();
+  if (!base || !token) return new Map();
+  try {
+    const anonKey = getSupabaseAnonKey();
+    const inList = unique.map((id) => `"${id}"`).join(',');
+    const res = await fetch(
+      `${base}/rest/v1/players?id=in.(${inList})&select=id,display_name,full_name`,
+      { headers: { Authorization: `Bearer ${token}`, apikey: anonKey || token } }
+    );
+    if (!res.ok) return new Map();
+    const rows: { id: string; display_name: string; full_name: string | null }[] = await res.json();
+    return new Map(rows.map((r) => [r.id, { display_name: r.display_name, full_name: r.full_name }]));
+  } catch {
+    return new Map();
+  }
 }
 
 export async function listSeasons(groupId: string): Promise<Season[]> {

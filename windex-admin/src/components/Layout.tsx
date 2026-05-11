@@ -12,6 +12,7 @@ export function Layout() {
     { path: '/events/new', label: 'Round Entry' },
     { path: '/standings', label: 'Standings' },
     { path: '/groups', label: 'Groups' },
+    { path: '/cup-champions', label: 'Cup Champions' },
     { path: '/players', label: 'Players' },
     { path: '/activity', label: 'App Activity' },
     { path: '/analytics/points', label: 'Points Analysis' },

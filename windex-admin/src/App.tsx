@@ -10,6 +10,7 @@ import { PlayerMapping } from './pages/PlayerMapping';
 import { Standings } from './pages/Standings';
 import { Groups } from './pages/Groups';
 import { GroupDetail } from './pages/GroupDetail';
+import { CupChampions } from './pages/CupChampions';
 import { Login } from './pages/Login';
 import { PointsAnalysis } from './pages/PointsAnalysis';
 import { Players } from './pages/Players';
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="standings" element={<Standings />} />
         <Route path="groups" element={<Groups />} />
         <Route path="groups/:groupId" element={<GroupDetail />} />
+        <Route path="cup-champions" element={<CupChampions />} />
         <Route path="analytics/points" element={<PointsAnalysis />} />
         <Route path="players" element={<Players />} />
         <Route path="activity" element={<Activity />} />

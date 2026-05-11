@@ -55,7 +55,7 @@ serve(async (req) => {
 
   let query = supabase
     .from("seasons")
-    .select("id, group_id, start_date, end_date")
+    .select("id, group_id, start_date, end_date, cup_champion_player_id, cup_champion_notes")
     .order("start_date", { ascending: false });
 
   if (groupId) {
@@ -71,12 +71,23 @@ serve(async (req) => {
     );
   }
 
-  const seasons = (data ?? []).map((row: { id: string; group_id: string; start_date: string; end_date: string }) => ({
+  type SeasonRow = {
+    id: string;
+    group_id: string;
+    start_date: string;
+    end_date: string;
+    cup_champion_player_id: string | null;
+    cup_champion_notes: string | null;
+  };
+
+  const seasons = (data ?? []).map((row: SeasonRow) => ({
     id: row.id,
     group_id: row.group_id,
     name: null as string | null,
     start_date: row.start_date,
     end_date: row.end_date,
+    cup_champion_player_id: row.cup_champion_player_id,
+    cup_champion_notes: row.cup_champion_notes,
   }));
 
   return new Response(JSON.stringify({ seasons }), {
