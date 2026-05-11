@@ -66,6 +66,10 @@ Implemented in `windex-api/supabase/migrations/`. Atomic-records-only; standings
 - **User onboarding paths.** Two consumers of `supabase.auth.admin.inviteUserByEmail`: (1) `windex-api/scripts/invite-players.mjs` (launch flow — invited the original 19 players one-at-a-time, well under the 2/hour rate limit); (2) the `invite-player` Edge Function (admin "Add Player" flow, single-add per call). For bulk seeding without sending emails, `admin.createUser` is the alternative — it predates the unified flow and is still in scripts. **There is no `handle_new_user` trigger** despite an earlier version of this doc claiming otherwise; the FIRST `auth.users` trigger in this project is `link_player_on_auth_signup` from migration 020 (2026-05-09), which auto-links a pending players row by email match on first sign-in.
 - **Three-folder repo layout, single Vercel deploy target.** Mobile/PWA, admin UI, and backend/scripts coexist in one repo to keep the data model, types, and migrations co-located. Only `windex-expo/` deploys to Vercel today; `windex-admin/` is currently expected to be run locally.
 
+## Design decisions
+
+- **Olive green (`#4B5E2A`) is retained as the in-app UI color** despite the deep-blue brand chrome (Windex icon, splash, OTP-email heading at `#091648`). The visual mismatch between brand surfaces and in-app surfaces is by design — the olive is part of the app's established identity from the Late Add v1 era and predates the deep-blue brand. Re-skinning was considered and declined 2026-05-11.
+
 ## Live URLs
 
 - **Production (PWA):** https://windexgolf.com — cut over from `app.lateaddgolf.com` on 2026-05-05; `app.lateaddgolf.com` now 308-redirects to `windexgolf.com` (kept as redirect source for legacy bookmarks; do not delete or unlink). `lateaddgolf.com` (apex) and `www.lateaddgolf.com` remain GoDaddy parking pages and were intentionally never wired to Vercel.
