@@ -121,7 +121,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    if (supabase) await supabase.auth.signOut();
+    // Local scope: kill this device's session only. supabase-js defaults to
+    // 'global' which terminates every active session for the user across
+    // every device — surprising UX (signing out on a phone also kicks the
+    // laptop) and noisy in the login_events audit log (N rows per click).
+    // If we ever expose a "Sign out everywhere" action for the lost-device
+    // case, that's the place to use scope: 'global'. Surfaced 2026-05-11
+    // via migration 022's session-trigger logging.
+    if (supabase) await supabase.auth.signOut({ scope: 'local' });
     setSignedIn(false);
     setUserId(null);
   }, [supabase]);
