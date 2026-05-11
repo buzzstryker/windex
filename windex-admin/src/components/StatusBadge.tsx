@@ -1,6 +1,3 @@
-import React from 'react';
-import type { EventStatus } from '../types';
-
 const LABELS: Record<string, string> = {
   processed: 'Processed',
   partial_unresolved_players: 'Partial (unresolved players)',

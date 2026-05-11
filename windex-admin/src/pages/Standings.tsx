@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { DataTable } from '../components/DataTable';
 import { LoadingSpinner } from '../components/LoadingSpinner';
-import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { getStandings, getPlayerStandingsHistory } from '../api/standings';
 import { listGroups, listSeasons } from '../api/groups';
@@ -19,7 +18,6 @@ export function Standings() {
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [standingsLoading, setStandingsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [selectedPlayer, setSelectedPlayer] = useState<StandingRow | null>(null);
   const [playerHistory, setPlayerHistory] = useState<PlayerStandingsHistoryResponse | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -84,7 +82,6 @@ export function Standings() {
   };
 
   if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorState message={error} onRetry={() => window.location.reload()} />;
 
   const columns = [
     { key: 'rank', label: 'Rank', render: (r: StandingRow) => r.rank ?? '—' },
