@@ -1,5 +1,24 @@
 # Windex — Backlog
 
+- **Cup Champion per season — phone app display + admin manual input.** Manually-recorded per-season Cup Champion (separate from the auto-computed points standings winner). Two surfaces and one schema change.
+
+  - **Phone app (`windex-expo`)** — on the GroupDetail "Previous Seasons" section: add a "Cup Champion" column displaying the manually-recorded champion's `display_name`, or "—" if none recorded. **Remove** the existing date-range hint column (`start_date` / `end_date`). **Keep** the existing Points Standings winner + Points total columns as-is. Applies to **all groups**, not just Windex Cup — every group's Previous Seasons section gets the new column.
+
+  - **Admin UI (`windex-admin`)** — manual input flow. **Open question** to decide at build time: standalone "Cup Champions" tab in the nav, OR fold into the existing GroupDetail Seasons section as a "Set Cup Champion" action per season row? Folding into GroupDetail is probably cleaner since it co-locates the champion with the season; standalone tab is simpler navigation. Form: for a given season, pick a player from the group's members. Save. Optional notes field (e.g. "decided via 18-hole match play playoff"). Super admin only (matches the rest of the admin app).
+
+  - **Schema changes** (new migration when built). Add to `seasons` table:
+    - `cup_champion_player_id TEXT NULL REFERENCES public.players(id) ON DELETE SET NULL`
+    - `cup_champion_notes TEXT NULL`
+
+    Nullable because (a) the current season has no champion yet, (b) older seasons may never get one designated, (c) leagues that don't run a Cup-style competition can leave it null.
+
+  - **Design decisions to lock down at build time:**
+    - Whether the phone app shows current-season Cup Champion at all (probably not — it's an end-of-season thing; or show "TBD" if you want a placeholder visible).
+    - Whether the points-winner is auto-computed and stored vs computed on the fly; if the latter, Cup Champion is the only manually-stored field.
+    - Whether to log Cup Champion assignments in `user_events` for audit (probably yes given the manual nature — `championship_assigned` event type).
+
+  - **Scope guard**: one feature, two surfaces, one schema change. Do **not** expand into Cup runner-up, multi-place rankings, or other tournament metadata unless explicitly asked.
+
 - **Leap-year drift in season-rollover dates (low priority, cosmetic):** `ensure_next_season_for_group()` (migration 021) computes `next_end = next_start + INTERVAL '1 year' - INTERVAL '1 day'`. When `next_start` is March 1 of a year following a leap year (or any date crossing a Feb-29 boundary), Postgres `+ INTERVAL '1 year'` truncates to the last valid day of February, which makes the resulting `end_date` drift back one day. For golf league seasons this is invisible — Windex Cup's Dec-Nov and YC Windex's Sept-Aug never cross Feb-29 in their start_date. Flagged in case Windex ever picks up a group whose start_date IS in March, in which case we'd want to switch to month-based arithmetic instead.
 
 - ~~**Activity viewer in windex-admin — covers both login_events and user_events.**~~ **Done 2026-05-11.** "App Activity" admin tab at `/activity` (list) and `/activity/:player_id` (detail) consumes the `public.activity_events` view (migration 024) plus three RPC helpers (`get_players_with_last_activity`, `get_player_activity_timeline`, `get_player_activity_summary`). Token refresh is excluded at the view level. Super-admin gated via `isCurrentUserSuperAdmin()` + RLS on the underlying tables. Naive "views per group" queries on user_events should filter `event_type = 'view_leaderboard'` explicitly, because a group switch fires `group_switch` + a view_* event per currently-mounted tab — documented in `windex-expo/lib/userEvents.ts` header.
