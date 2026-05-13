@@ -6,7 +6,8 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmToast } from '../components/ConfirmToast';
-import { listGroups } from '../api/groups';
+import { CreateGroupModal } from '../components/CreateGroupModal';
+import { isCurrentUserSuperAdmin, listGroups } from '../api/groups';
 import type { Group } from '../types';
 
 interface FlashState { flash?: string }
@@ -19,6 +20,8 @@ export function Groups() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Consume the flash state once so the message doesn't reappear on back/forward.
   useEffect(() => {
@@ -38,6 +41,7 @@ export function Groups() {
 
   useEffect(() => {
     load();
+    isCurrentUserSuperAdmin().then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
   }, []);
 
   if (loading) return <LoadingSpinner />;
@@ -57,9 +61,26 @@ export function Groups() {
   return (
     <>
       <PageHeader title="Groups" subtitle="League units; select a group to view seasons and standings." />
+
+      {isSuperAdmin && (
+        <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            className="btn btn-primary"
+            onClick={() => setCreateOpen(true)}
+            style={{ padding: '8px 14px' }}
+          >
+            + Create Group
+          </button>
+        </div>
+      )}
+
       <div className="card">
         {groups.length === 0 ? (
-          <EmptyState message="No groups yet. Create groups in the backend or via Supabase." />
+          <EmptyState message={
+            isSuperAdmin
+              ? 'No groups yet. Click "Create Group" to add one.'
+              : 'No groups yet.'
+          } />
         ) : (
           <DataTable
             columns={columns}
@@ -69,7 +90,19 @@ export function Groups() {
           />
         )}
       </div>
+
       {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} />}
+
+      <CreateGroupModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSuccess={(group) => {
+          setCreateOpen(false);
+          navigate(`/groups/${group.id}`, {
+            state: { flash: `Group "${group.name}" created.` },
+          });
+        }}
+      />
     </>
   );
 }

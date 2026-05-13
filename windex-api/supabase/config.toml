@@ -91,3 +91,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.invite-player]
 verify_jwt = false
+[functions.create-group]
+verify_jwt = false

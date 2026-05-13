@@ -43,6 +43,20 @@ export interface PlayerWithMembership extends PlayerDetail {
   membership: GroupMembership;
 }
 
+/**
+ * List every player in the table — used by the Create Group admin picker.
+ * RLS (`players_select` in migration 015) is `USING (true)` for authenticated
+ * users, so any signed-in admin can read this. Sorted by display_name.
+ */
+export async function listAllPlayers(): Promise<PlayerDetail[]> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/players?select=id,display_name,full_name,email,venmo_handle,photo_url,is_active&order=display_name.asc`,
+    { headers: headers() }
+  );
+  if (!res.ok) throw new Error(`Failed to fetch players: ${res.status}`);
+  return res.json();
+}
+
 export async function listPlayersWithMembership(groupId: string): Promise<PlayerWithMembership[]> {
   // Fetch group_members for this group
   const membersRes = await fetch(

@@ -92,6 +92,9 @@ export interface Group {
   id: string;
   name: string;
   section_id?: string | null;
+  logo_url?: string | null;
+  season_start_month?: number;
+  dollars_per_point?: number | null;
 }
 
 /** Season. */
