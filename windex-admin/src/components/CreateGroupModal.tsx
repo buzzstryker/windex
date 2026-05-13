@@ -166,6 +166,7 @@ export function CreateGroupModal({ open, onClose, onSuccess }: CreateGroupModalP
       venmo_handle: null,
       photo_url: null,
       is_active: result.player.is_active,
+      user_id: result.player.user_id,
     };
     setAllPlayers((prev) => {
       if (prev.some((p) => p.id === newPlayer.id)) return prev;

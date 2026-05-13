@@ -4,10 +4,12 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmToast } from '../components/ConfirmToast';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { AddPlayerModal } from '../components/AddPlayerModal';
 import { isCurrentUserSuperAdmin, listGroups } from '../api/groups';
 import {
   listPlayersWithMembership, updatePlayer, updateMembership,
+  sendInvite, PlayerAlreadyLinkedError,
   type PlayerWithMembership,
 } from '../api/playerAdmin';
 import { getAuthToken } from '../api/client';
@@ -23,6 +25,10 @@ function getCurrentUserId(): string | null {
   }
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const hasValidEmail = (email: string | null) =>
+  !!email && EMAIL_RE.test(email.trim());
+
 export function Players() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupId, setGroupId] = useState('');
@@ -35,6 +41,10 @@ export function Players() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Send-invite flow state.
+  const [inviteTarget, setInviteTarget] = useState<PlayerWithMembership | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   useEffect(() => {
     listGroups().then(setGroups).catch(() => {});
@@ -93,6 +103,39 @@ export function Players() {
     }
   };
 
+  const handleConfirmInvite = async () => {
+    if (!inviteTarget) return;
+    setInviting(true);
+    setInviteError(null);
+    try {
+      const res = await sendInvite(inviteTarget.id);
+      // Compose a status line based on what actually happened.
+      let line: string;
+      if (res.already_had_auth) {
+        line = `Auth account already existed for ${inviteTarget.email}; linked without re-emailing.`;
+      } else if (res.invite_sent && res.linked) {
+        line = `Invite sent to ${inviteTarget.email}.`;
+      } else if (res.invite_sent && !res.linked) {
+        // Trigger didn't link — possible email casing/whitespace mismatch.
+        // Tell the admin so they don't assume "linked" silently.
+        line = `Invite sent to ${inviteTarget.email}, but auto-link didn't fire. Refresh and check the player's email.`;
+      } else {
+        line = `Invite request returned without change. Refresh and verify.`;
+      }
+      setToast(line);
+      setInviteTarget(null);
+      load(); // refresh row state so button → badge transition is visible
+    } catch (e) {
+      if (e instanceof PlayerAlreadyLinkedError) {
+        setInviteError('This player is already linked to an auth user. Refresh the page.');
+      } else {
+        setInviteError(e instanceof Error ? e.message : 'Failed to send invite');
+      }
+    } finally {
+      setInviting(false);
+    }
+  };
+
   return (
     <>
       <PageHeader title="Players" subtitle="View and manage player data by group." />
@@ -139,6 +182,30 @@ export function Players() {
         />
       )}
 
+      <ConfirmModal
+        open={inviteTarget !== null}
+        title="Send invite"
+        confirmLabel="Send invite"
+        busy={inviting}
+        errorMessage={inviteError}
+        onCancel={() => { setInviteTarget(null); setInviteError(null); }}
+        onConfirm={handleConfirmInvite}
+      >
+        {inviteTarget && (
+          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+            <p style={{ margin: 0 }}>
+              Send an OTP invite to <strong>{inviteTarget.display_name}</strong> at{' '}
+              <code>{inviteTarget.email}</code>?
+            </p>
+            <p style={{ margin: '12px 0 0', color: '#666', fontSize: 13 }}>
+              The player will receive a sign-in email. If they already have an auth
+              account under that email, we'll link the player record without sending
+              a new email.
+            </p>
+          </div>
+        )}
+      </ConfirmModal>
+
       {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} duration={5000} />}
 
       {loading && <LoadingSpinner />}
@@ -168,7 +235,13 @@ export function Players() {
               {players.map((p) => (
                 editingId === p.id
                   ? <EditRow key={p.id} player={p} onSave={(f) => handleSave(p, f)} onCancel={() => setEditingId(null)} saving={saving} />
-                  : <DisplayRow key={p.id} player={p} onEdit={() => { setEditingId(p.id); setSaveMsg(null); }} />
+                  : <DisplayRow
+                      key={p.id}
+                      player={p}
+                      isSuperAdmin={isSuperAdmin}
+                      onEdit={() => { setEditingId(p.id); setSaveMsg(null); }}
+                      onSendInvite={() => { setInviteError(null); setInviteTarget(p); }}
+                    />
               ))}
             </tbody>
           </table>
@@ -178,12 +251,49 @@ export function Players() {
   );
 }
 
-function DisplayRow({ player: p, onEdit }: { player: PlayerWithMembership; onEdit: () => void }) {
+function DisplayRow({
+  player: p,
+  isSuperAdmin,
+  onEdit,
+  onSendInvite,
+}: {
+  player: PlayerWithMembership;
+  isSuperAdmin: boolean;
+  onEdit: () => void;
+  onSendInvite: () => void;
+}) {
+  const linked = p.user_id !== null && p.user_id !== undefined;
+  const emailOk = hasValidEmail(p.email);
+  // Disabled-button tooltip explains why send is blocked.
+  const inviteDisabledReason = !emailOk
+    ? (p.email ? 'Email is invalid' : 'Add an email first')
+    : null;
+
   return (
     <tr style={{ borderBottom: '1px solid #eee' }}>
       <td style={{ padding: '6px 10px', fontWeight: 600 }}>{p.display_name}</td>
       <td style={{ padding: '6px 10px', color: '#666' }}>{p.full_name ?? '—'}</td>
-      <td style={{ padding: '6px 10px', color: '#666' }}>{p.email ?? '—'}</td>
+      <td style={{ padding: '6px 10px', color: '#666' }}>
+        {p.email ?? '—'}
+        {linked && (
+          <span
+            title="Linked to an auth.users row"
+            style={{
+              marginLeft: 8,
+              padding: '1px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#2e7d32',
+              background: '#e8f5e9',
+              border: '1px solid #a5d6a7',
+              borderRadius: 10,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Invited ✓
+          </span>
+        )}
+      </td>
       <td style={{ padding: '6px 10px', color: '#666' }}>{p.venmo_handle ?? '—'}</td>
       <td style={{ padding: '6px 10px' }}>{p.membership.role}</td>
       <td style={{ padding: '6px 10px' }}>
@@ -191,7 +301,18 @@ function DisplayRow({ player: p, onEdit }: { player: PlayerWithMembership; onEdi
           {p.membership.is_active ? 'Yes' : 'No'}
         </span>
       </td>
-      <td style={{ padding: '6px 10px' }}>
+      <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>
+        {isSuperAdmin && !linked && (
+          <button
+            className="btn btn-primary"
+            onClick={emailOk ? onSendInvite : undefined}
+            disabled={!emailOk}
+            title={inviteDisabledReason ?? ''}
+            style={{ padding: '4px 10px', fontSize: 12, marginRight: 4, opacity: emailOk ? 1 : 0.55 }}
+          >
+            Send Invite
+          </button>
+        )}
         <button className="btn btn-secondary" onClick={onEdit} style={{ padding: '4px 10px', fontSize: 12 }}>Edit</button>
       </td>
     </tr>
