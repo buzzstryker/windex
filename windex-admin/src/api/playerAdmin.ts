@@ -29,6 +29,11 @@ export interface PlayerDetail {
   venmo_handle: string | null;
   photo_url: string | null;
   is_active: number;
+  /**
+   * auth.users.id link. NULL = player exists but has no auth account yet
+   * (i.e., eligible for an OTP invite via the send-invite Edge Function).
+   */
+  user_id: string | null;
 }
 
 export interface GroupMembership {
@@ -50,7 +55,7 @@ export interface PlayerWithMembership extends PlayerDetail {
  */
 export async function listAllPlayers(): Promise<PlayerDetail[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/players?select=id,display_name,full_name,email,venmo_handle,photo_url,is_active&order=display_name.asc`,
+    `${SUPABASE_URL}/rest/v1/players?select=id,display_name,full_name,email,venmo_handle,photo_url,is_active,user_id&order=display_name.asc`,
     { headers: headers() }
   );
   if (!res.ok) throw new Error(`Failed to fetch players: ${res.status}`);
@@ -72,7 +77,7 @@ export async function listPlayersWithMembership(groupId: string): Promise<Player
   const playerIds = members.map((m) => m.player_id);
   const inList = playerIds.map((id) => `"${id}"`).join(',');
   const playersRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/players?id=in.(${inList})&select=id,display_name,full_name,email,venmo_handle,photo_url,is_active`,
+    `${SUPABASE_URL}/rest/v1/players?id=in.(${inList})&select=id,display_name,full_name,email,venmo_handle,photo_url,is_active,user_id`,
     { headers: headers() }
   );
   if (!playersRes.ok) throw new Error(`Failed to fetch players: ${playersRes.status}`);
@@ -185,6 +190,58 @@ export async function invitePlayer(input: InvitePlayerInput): Promise<InvitePlay
     if (e instanceof ApiError && e.status === 409) {
       const body = e.body as { existing_player_id?: string } | undefined;
       if (body?.existing_player_id) throw new DuplicatePlayerEmailError(body.existing_player_id);
+    }
+    throw e;
+  }
+}
+
+// =============================================================================
+// send-invite Edge Function
+// =============================================================================
+
+export interface SendInviteResponse {
+  ok: true;
+  /** True if an invite email was sent. False when the auth user already existed and we just linked. */
+  invite_sent: boolean;
+  /** True if the email already had an auth.users row before this call. */
+  already_had_auth: boolean;
+  /**
+   * True if players.user_id is populated after the call. Mainly used to
+   * surface trigger failures (e.g. email casing/whitespace mismatch) — the
+   * link_player_on_auth_signup trigger from migration 020 should always
+   * fire on invite, but if it didn't we want to know rather than lie.
+   */
+  linked: boolean;
+  player: {
+    id: string;
+    display_name: string;
+    email: string | null;
+    user_id: string | null;
+  };
+}
+
+export class PlayerAlreadyLinkedError extends Error {
+  constructor(public userId: string) {
+    super('Player is already linked to an auth user');
+    this.name = 'PlayerAlreadyLinkedError';
+  }
+}
+
+/**
+ * POST /send-invite — sends an OTP invite for an existing player that has no
+ * auth.users row. Super-admin gated server-side. Translates the 409
+ * already-linked response into a typed error so the UI can prompt for a refresh.
+ */
+export async function sendInvite(playerId: string): Promise<SendInviteResponse> {
+  try {
+    return await apiFetch<SendInviteResponse>('/send-invite', {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      const body = e.body as { user_id?: string } | undefined;
+      if (body?.user_id) throw new PlayerAlreadyLinkedError(body.user_id);
     }
     throw e;
   }
