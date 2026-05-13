@@ -213,6 +213,80 @@ export async function createSeason(input: CreateSeasonInput): Promise<CreateSeas
 }
 
 /**
+ * Calls the `create-group` Edge Function. Sends multipart/form-data with a
+ * JSON `payload` part and an optional `image` part. The Edge Function does
+ * its own super-admin gate, name uniqueness check, image upload, and atomic
+ * groups + group_members insert (with rollback on failure).
+ *
+ * 409 (duplicate name) is surfaced as a typed DuplicateGroupNameError so the
+ * UI can offer "view existing group" without parsing strings.
+ */
+export interface CreateGroupInput {
+  name: string;
+  season_start_month: number; // 1..12
+  admin_player_ids: string[];
+  image: File | null;
+}
+
+export interface CreateGroupResult {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  season_start_month: number;
+  section_id: string | null;
+  dollars_per_point: number | null;
+  user_id: string;
+  created_at: string;
+}
+
+export class DuplicateGroupNameError extends Error {
+  constructor(public existingGroupId: string) {
+    super('A group with this name already exists');
+    this.name = 'DuplicateGroupNameError';
+  }
+}
+
+export async function createGroup(input: CreateGroupInput): Promise<CreateGroupResult> {
+  const form = new FormData();
+  form.append(
+    'payload',
+    JSON.stringify({
+      name: input.name,
+      season_start_month: input.season_start_month,
+      admin_player_ids: input.admin_player_ids,
+    })
+  );
+  if (input.image) form.append('image', input.image, input.image.name);
+
+  const token = getAuthToken() ?? ANON_KEY;
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (ANON_KEY) headers['apikey'] = ANON_KEY;
+  // Do NOT set Content-Type — the browser sets it with the multipart boundary.
+
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/create-group`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+  const text = await res.text();
+  let body: unknown = text;
+  try { body = text ? JSON.parse(text) : null; } catch { /* keep raw */ }
+
+  if (!res.ok) {
+    if (res.status === 409) {
+      const b = body as { existing_group_id?: string } | null;
+      if (b?.existing_group_id) throw new DuplicateGroupNameError(b.existing_group_id);
+    }
+    const b = body as { error?: string; details?: string } | null;
+    throw new Error(b?.error ?? b?.details ?? `HTTP ${res.status}`);
+  }
+  const ok = body as { group?: CreateGroupResult } | null;
+  if (!ok?.group) throw new Error('Malformed response from create-group');
+  return ok.group;
+}
+
+/**
  * Hard delete of a group. Relies on FK ON DELETE CASCADE for group_members,
  * seasons, league_rounds (and transitively league_scores via league_rounds).
  * Players are intentionally not cleaned up — orphans are left in place.
