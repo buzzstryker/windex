@@ -95,3 +95,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.send-invite]
 verify_jwt = false
+[functions.send-invite-again]
+verify_jwt = false
