@@ -10,7 +10,9 @@ import { isCurrentUserSuperAdmin, listGroups } from '../api/groups';
 import {
   listPlayersWithMembership, updatePlayer, updateMembership,
   sendInvite, PlayerAlreadyLinkedError,
-  type PlayerWithMembership,
+  sendInviteAgain, PlayerAlreadySignedInError, PlayerNotYetInvitedError,
+  getPlayersAuthStatus,
+  type PlayerWithMembership, type PlayerAuthStatus,
 } from '../api/playerAdmin';
 import { getAuthToken } from '../api/client';
 import type { Group } from '../types';
@@ -29,6 +31,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hasValidEmail = (email: string | null) =>
   !!email && EMAIL_RE.test(email.trim());
 
+type InviteMode = 'first' | 'again';
+
 export function Players() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupId, setGroupId] = useState('');
@@ -41,8 +45,15 @@ export function Players() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  // Send-invite flow state.
+  // Per-player auth status from get_players_auth_status RPC (migration 027).
+  // Empty until the RPC resolves; rows render the conservative "no Send Again"
+  // affordance until then so we never surface the button against a player who
+  // may have already signed in.
+  const [authStatus, setAuthStatus] = useState<Map<string, PlayerAuthStatus>>(new Map());
+  // Invite flow state — shared between first-send and send-again. inviteMode
+  // selects ConfirmModal copy + which backend the handler dispatches to.
   const [inviteTarget, setInviteTarget] = useState<PlayerWithMembership | null>(null);
+  const [inviteMode, setInviteMode] = useState<InviteMode>('first');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
@@ -50,6 +61,18 @@ export function Players() {
     listGroups().then(setGroups).catch(() => {});
     isCurrentUserSuperAdmin().then(setIsSuperAdmin).catch(() => setIsSuperAdmin(false));
   }, []);
+
+  // Load auth status whenever we become a super admin. Non-admins get an
+  // empty map from the RPC (it self-gates) so this is a safe no-op too.
+  const loadAuthStatus = useCallback(() => {
+    getPlayersAuthStatus()
+      .then(setAuthStatus)
+      .catch(() => setAuthStatus(new Map()));
+  }, []);
+
+  useEffect(() => {
+    if (isSuperAdmin) loadAuthStatus();
+  }, [isSuperAdmin, loadAuthStatus]);
 
   const load = useCallback(async () => {
     if (!groupId) { setPlayers([]); return; }
@@ -75,9 +98,6 @@ export function Players() {
     role: string;
     is_active: number;
   }) => {
-    // Sign-in check: RLS still requires an authenticated session, but we no
-    // longer need the user_id for the PATCH WHERE clause — RLS handles the
-    // super-admin / owning-user gate.
     if (!getCurrentUserId()) { setSaveMsg('Not signed in'); return; }
     setSaving(true);
     setSaveMsg(null);
@@ -108,26 +128,33 @@ export function Players() {
     setInviting(true);
     setInviteError(null);
     try {
-      const res = await sendInvite(inviteTarget.id);
-      // Compose a status line based on what actually happened.
-      let line: string;
-      if (res.already_had_auth) {
-        line = `Auth account already existed for ${inviteTarget.email}; linked without re-emailing.`;
-      } else if (res.invite_sent && res.linked) {
-        line = `Invite sent to ${inviteTarget.email}.`;
-      } else if (res.invite_sent && !res.linked) {
-        // Trigger didn't link — possible email casing/whitespace mismatch.
-        // Tell the admin so they don't assume "linked" silently.
-        line = `Invite sent to ${inviteTarget.email}, but auto-link didn't fire. Refresh and check the player's email.`;
+      if (inviteMode === 'first') {
+        const res = await sendInvite(inviteTarget.id);
+        let line: string;
+        if (res.already_had_auth) {
+          line = `Auth account already existed for ${inviteTarget.email}; linked without re-emailing.`;
+        } else if (res.invite_sent && res.linked) {
+          line = `Invite sent to ${inviteTarget.email}.`;
+        } else if (res.invite_sent && !res.linked) {
+          line = `Invite sent to ${inviteTarget.email}, but auto-link didn't fire. Refresh and check the player's email.`;
+        } else {
+          line = `Invite request returned without change. Refresh and verify.`;
+        }
+        setToast(line);
       } else {
-        line = `Invite request returned without change. Refresh and verify.`;
+        await sendInviteAgain(inviteTarget.id);
+        setToast(`Invite sent again to ${inviteTarget.email}.`);
       }
-      setToast(line);
       setInviteTarget(null);
-      load(); // refresh row state so button → badge transition is visible
+      load();
+      loadAuthStatus(); // refresh per-row state so button transitions reflect server truth
     } catch (e) {
       if (e instanceof PlayerAlreadyLinkedError) {
         setInviteError('This player is already linked to an auth user. Refresh the page.');
+      } else if (e instanceof PlayerAlreadySignedInError) {
+        setInviteError('This player has already signed in — no re-invite needed. Refresh the page.');
+      } else if (e instanceof PlayerNotYetInvitedError) {
+        setInviteError('This player has never been invited. Refresh and use Send Invite instead.');
       } else {
         setInviteError(e instanceof Error ? e.message : 'Failed to send invite');
       }
@@ -135,6 +162,10 @@ export function Players() {
       setInviting(false);
     }
   };
+
+  // ConfirmModal copy varies by mode; build it inline.
+  const modalTitle = inviteMode === 'again' ? 'Send invite again' : 'Send invite';
+  const modalConfirmLabel = inviteMode === 'again' ? 'Send again' : 'Send invite';
 
   return (
     <>
@@ -175,23 +206,22 @@ export function Players() {
               lines.push('Auth account already existed; linked or will auto-link on next sign-in');
             }
             setToast(lines.join(' — '));
-            // Refresh members if a group is selected; otherwise the list stays empty
-            // (selection-driven page) and the new player will appear once selected.
             if (groupId) load();
+            loadAuthStatus();
           }}
         />
       )}
 
       <ConfirmModal
         open={inviteTarget !== null}
-        title="Send invite"
-        confirmLabel="Send invite"
+        title={modalTitle}
+        confirmLabel={modalConfirmLabel}
         busy={inviting}
         errorMessage={inviteError}
         onCancel={() => { setInviteTarget(null); setInviteError(null); }}
         onConfirm={handleConfirmInvite}
       >
-        {inviteTarget && (
+        {inviteTarget && inviteMode === 'first' && (
           <div style={{ fontSize: 14, lineHeight: 1.5 }}>
             <p style={{ margin: 0 }}>
               Send an OTP invite to <strong>{inviteTarget.display_name}</strong> at{' '}
@@ -201,6 +231,17 @@ export function Players() {
               The player will receive a sign-in email. If they already have an auth
               account under that email, we'll link the player record without sending
               a new email.
+            </p>
+          </div>
+        )}
+        {inviteTarget && inviteMode === 'again' && (
+          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+            <p style={{ margin: 0 }}>
+              Send invite again to <strong>{inviteTarget.display_name}</strong> at{' '}
+              <code>{inviteTarget.email}</code>?
+            </p>
+            <p style={{ margin: '12px 0 0', color: '#666', fontSize: 13 }}>
+              This will invalidate any previous invite link and send a fresh one.
             </p>
           </div>
         )}
@@ -239,8 +280,10 @@ export function Players() {
                       key={p.id}
                       player={p}
                       isSuperAdmin={isSuperAdmin}
+                      authStatus={authStatus.get(p.id) ?? null}
                       onEdit={() => { setEditingId(p.id); setSaveMsg(null); }}
-                      onSendInvite={() => { setInviteError(null); setInviteTarget(p); }}
+                      onSendInvite={() => { setInviteMode('first'); setInviteError(null); setInviteTarget(p); }}
+                      onSendInviteAgain={() => { setInviteMode('again'); setInviteError(null); setInviteTarget(p); }}
                     />
               ))}
             </tbody>
@@ -254,20 +297,37 @@ export function Players() {
 function DisplayRow({
   player: p,
   isSuperAdmin,
+  authStatus,
   onEdit,
   onSendInvite,
+  onSendInviteAgain,
 }: {
   player: PlayerWithMembership;
   isSuperAdmin: boolean;
+  authStatus: PlayerAuthStatus | null;
   onEdit: () => void;
   onSendInvite: () => void;
+  onSendInviteAgain: () => void;
 }) {
   const linked = p.user_id !== null && p.user_id !== undefined;
   const emailOk = hasValidEmail(p.email);
-  // Disabled-button tooltip explains why send is blocked.
   const inviteDisabledReason = !emailOk
     ? (p.email ? 'Email is invalid' : 'Add an email first')
     : null;
+
+  // Three-state derivation for the action affordance:
+  //   showSendInvite     — never invited (no user_id). Existing first-send flow.
+  //   showSendAgain      — invited, but not yet confirmed/signed in.
+  //                        Requires auth status to confirm (conservative until
+  //                        the RPC resolves so we don't surface "Send Again"
+  //                        against someone who actually signed in already).
+  //   showBadgeOnly      — fully active. No button.
+  const showSendInvite = isSuperAdmin && !linked;
+  const showSendAgain =
+    isSuperAdmin
+    && linked
+    && authStatus !== null
+    && !authStatus.has_signed_in;
 
   return (
     <tr style={{ borderBottom: '1px solid #eee' }}>
@@ -302,7 +362,7 @@ function DisplayRow({
         </span>
       </td>
       <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>
-        {isSuperAdmin && !linked && (
+        {showSendInvite && (
           <button
             className="btn btn-primary"
             onClick={emailOk ? onSendInvite : undefined}
@@ -311,6 +371,15 @@ function DisplayRow({
             style={{ padding: '4px 10px', fontSize: 12, marginRight: 4, opacity: emailOk ? 1 : 0.55 }}
           >
             Send Invite
+          </button>
+        )}
+        {showSendAgain && (
+          <button
+            className="btn btn-primary"
+            onClick={onSendInviteAgain}
+            style={{ padding: '4px 10px', fontSize: 12, marginRight: 4 }}
+          >
+            Send Again
           </button>
         )}
         <button className="btn btn-secondary" onClick={onEdit} style={{ padding: '4px 10px', fontSize: 12 }}>Edit</button>

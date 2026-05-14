@@ -246,3 +246,94 @@ export async function sendInvite(playerId: string): Promise<SendInviteResponse> 
     throw e;
   }
 }
+
+// =============================================================================
+// Player auth status (migration 027) + send-invite-again Edge Function
+// =============================================================================
+
+/**
+ * Per-player onboarding state row returned by the `get_players_auth_status()`
+ * RPC. The RPC joins `players` to `auth.users` server-side (super-admin
+ * gated) so the UI can decide which affordance to render per row without
+ * needing direct access to the auth schema.
+ */
+export interface PlayerAuthStatus {
+  player_id: string;
+  has_signed_in: boolean;
+  invited_at: string | null;
+  email_confirmed_at: string | null;
+  last_sign_in_at: string | null;
+}
+
+/**
+ * Calls the `get_players_auth_status()` RPC from migration 027. Returns a
+ * Map keyed by player_id for O(1) lookup from the row-render path. Returns
+ * an empty Map if the caller isn't a super admin (the RPC gates internally).
+ */
+export async function getPlayersAuthStatus(): Promise<Map<string, PlayerAuthStatus>> {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/rpc/get_players_auth_status`,
+    {
+      method: 'POST',
+      headers: headers(),
+      body: '{}',
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`get_players_auth_status failed (${res.status}): ${text}`);
+  }
+  const rows: PlayerAuthStatus[] = await res.json();
+  return new Map(rows.map((r) => [r.player_id, r]));
+}
+
+export interface SendInviteAgainResponse {
+  ok: true;
+  /** Server-side timestamp of when the re-invite was issued. */
+  sent_at: string;
+  /** auth.users.invited_at after the call. null if the post-read failed (warning included). */
+  invited_at: string | null;
+  player: {
+    id: string;
+    display_name: string;
+    email: string | null;
+    user_id: string | null;
+  };
+  warning?: string;
+}
+
+export class PlayerNotYetInvitedError extends Error {
+  constructor() {
+    super('Player has never been invited. Use Send Invite, not Send Again.');
+    this.name = 'PlayerNotYetInvitedError';
+  }
+}
+
+export class PlayerAlreadySignedInError extends Error {
+  constructor() {
+    super('Player has already signed in. No re-invite needed.');
+    this.name = 'PlayerAlreadySignedInError';
+  }
+}
+
+/**
+ * POST /send-invite-again — re-sends the Supabase invite email to a player
+ * who was invited but never confirmed/signed in. Super-admin gated server-side.
+ * Translates the 409 responses into typed errors so the UI can show specific
+ * remediation messages without parsing strings.
+ */
+export async function sendInviteAgain(playerId: string): Promise<SendInviteAgainResponse> {
+  try {
+    return await apiFetch<SendInviteAgainResponse>('/send-invite-again', {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) {
+      const body = e.body as { reason?: string } | undefined;
+      if (body?.reason === 'not_yet_invited') throw new PlayerNotYetInvitedError();
+      if (body?.reason === 'already_signed_in') throw new PlayerAlreadySignedInError();
+    }
+    throw e;
+  }
+}
