@@ -300,7 +300,7 @@ export default function GroupDetailScreen() {
                         </Text>
                       </View>
                       <View style={styles.prevSeasonRow}>
-                        <Text style={styles.prevSeasonLabel}>Points Winner: </Text>
+                        <Text style={styles.prevSeasonLabel}>Points Champion: </Text>
                         <Text style={pointsWinnerName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
                           {pointsWinnerName ?? '\u2014'}
                         </Text>
