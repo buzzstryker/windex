@@ -33,6 +33,50 @@ const hasValidEmail = (email: string | null) =>
 
 type InviteMode = 'first' | 'again';
 
+// ─── Status column ────────────────────────────────────────────────────────
+// Three-state derivation from players.user_id + the get_players_auth_status
+// RPC. Returns null when we don't have enough info yet (RPC still loading
+// for a linked player). The "not invited" state is derivable from the row
+// alone, so it renders immediately.
+type StatusKey = 'not_invited' | 'invited' | 'signed_in';
+
+function deriveStatus(
+  player: PlayerWithMembership,
+  authStatus: PlayerAuthStatus | null
+): StatusKey | null {
+  if (!player.user_id) return 'not_invited';
+  if (!authStatus) return null;
+  return authStatus.has_signed_in ? 'signed_in' : 'invited';
+}
+
+const STATUS_PILL: Record<StatusKey, { label: string; color: string; bg: string; border: string }> = {
+  not_invited: { label: 'not invited', color: '#616161', bg: '#f5f5f5', border: '#e0e0e0' },
+  invited:     { label: 'invited',     color: '#f57c00', bg: '#fff8e1', border: '#ffe0b2' },
+  signed_in:   { label: 'signed in',   color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7' },
+};
+
+function StatusPill({ status }: { status: StatusKey | null }) {
+  if (!status) return <span style={{ color: '#999', fontSize: 12 }}>—</span>;
+  const s = STATUS_PILL[status];
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '1px 8px',
+        fontSize: 11,
+        fontWeight: 600,
+        color: s.color,
+        background: s.bg,
+        border: `1px solid ${s.border}`,
+        borderRadius: 10,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
 export function Players() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupId, setGroupId] = useState('');
@@ -266,6 +310,7 @@ export function Players() {
                 <th style={{ padding: '8px 10px' }}>Name</th>
                 <th style={{ padding: '8px 10px' }}>Full Name</th>
                 <th style={{ padding: '8px 10px' }}>Email</th>
+                <th style={{ padding: '8px 10px' }}>Status</th>
                 <th style={{ padding: '8px 10px' }}>Venmo</th>
                 <th style={{ padding: '8px 10px' }}>Role</th>
                 <th style={{ padding: '8px 10px' }}>Active</th>
@@ -275,7 +320,14 @@ export function Players() {
             <tbody>
               {players.map((p) => (
                 editingId === p.id
-                  ? <EditRow key={p.id} player={p} onSave={(f) => handleSave(p, f)} onCancel={() => setEditingId(null)} saving={saving} />
+                  ? <EditRow
+                      key={p.id}
+                      player={p}
+                      authStatus={authStatus.get(p.id) ?? null}
+                      onSave={(f) => handleSave(p, f)}
+                      onCancel={() => setEditingId(null)}
+                      saving={saving}
+                    />
                   : <DisplayRow
                       key={p.id}
                       player={p}
@@ -329,31 +381,14 @@ function DisplayRow({
     && authStatus !== null
     && !authStatus.has_signed_in;
 
+  const status = deriveStatus(p, authStatus);
+
   return (
     <tr style={{ borderBottom: '1px solid #eee' }}>
       <td style={{ padding: '6px 10px', fontWeight: 600 }}>{p.display_name}</td>
       <td style={{ padding: '6px 10px', color: '#666' }}>{p.full_name ?? '—'}</td>
-      <td style={{ padding: '6px 10px', color: '#666' }}>
-        {p.email ?? '—'}
-        {linked && (
-          <span
-            title="Linked to an auth.users row"
-            style={{
-              marginLeft: 8,
-              padding: '1px 8px',
-              fontSize: 11,
-              fontWeight: 600,
-              color: '#2e7d32',
-              background: '#e8f5e9',
-              border: '1px solid #a5d6a7',
-              borderRadius: 10,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Invited ✓
-          </span>
-        )}
-      </td>
+      <td style={{ padding: '6px 10px', color: '#666' }}>{p.email ?? '—'}</td>
+      <td style={{ padding: '6px 10px' }}><StatusPill status={status} /></td>
       <td style={{ padding: '6px 10px', color: '#666' }}>{p.venmo_handle ?? '—'}</td>
       <td style={{ padding: '6px 10px' }}>{p.membership.role}</td>
       <td style={{ padding: '6px 10px' }}>
@@ -388,8 +423,9 @@ function DisplayRow({
   );
 }
 
-function EditRow({ player: p, onSave, onCancel, saving }: {
+function EditRow({ player: p, authStatus, onSave, onCancel, saving }: {
   player: PlayerWithMembership;
+  authStatus: PlayerAuthStatus | null;
   onSave: (fields: { display_name: string; full_name: string; email: string; venmo_handle: string; role: string; is_active: number }) => void;
   onCancel: () => void;
   saving: boolean;
@@ -400,6 +436,7 @@ function EditRow({ player: p, onSave, onCancel, saving }: {
   const [venmo, setVenmo] = useState(p.venmo_handle ?? '');
   const [role, setRole] = useState(p.membership.role);
   const [active, setActive] = useState(p.membership.is_active);
+  const status = deriveStatus(p, authStatus);
 
   return (
     <tr style={{ borderBottom: '1px solid #eee', background: '#f9f9f9' }}>
@@ -412,6 +449,7 @@ function EditRow({ player: p, onSave, onCancel, saving }: {
       <td style={{ padding: '4px 8px' }}>
         <input value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: '100%', padding: 4 }} />
       </td>
+      <td style={{ padding: '4px 8px' }}><StatusPill status={status} /></td>
       <td style={{ padding: '4px 8px' }}>
         <input value={venmo} onChange={(e) => setVenmo(e.target.value)} style={{ width: '100%', padding: 4 }} />
       </td>
