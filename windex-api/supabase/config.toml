@@ -68,6 +68,41 @@ otp_expiry = 3600
 subject = "Your Windex login code"
 content_path = "./supabase/templates/otp.html"
 
+# All five additional GoTrue email templates point at the same code-only
+# otp.html to defuse the {{ .ConfirmationURL }} landmines (2026-05-14).
+# Default GoTrue templates for confirmation/invite/recovery/email_change all
+# embed clickable magic-link URLs — exactly the attack surface that produced
+# phantom confirmations for three YC Windex players via email-security
+# scanners and iOS Mail prefetch. Reauthentication is code-only by default
+# but pinned here to remove dependency on Supabase upstream not changing
+# that default later. All point at the same otp.html because the body is
+# identical — separate files would invite drift. Production dashboard was
+# PATCHed via /v1/projects/{ref}/config/auth at the same time as this
+# commit (dashboard is source of truth; this file mirrors for local dev).
+# Body text says "Enter this code to sign in" which is technically imprecise
+# for email_change and reauthentication flows — both flows are dormant in
+# Windex (no user-facing UI), so the imprecision is acceptable. BACKLOG.md
+# tracks copy refinement for if/when those flows ship.
+[auth.email.template.confirmation]
+subject = "Your Windex login code"
+content_path = "./supabase/templates/otp.html"
+
+[auth.email.template.invite]
+subject = "Your Windex login code"
+content_path = "./supabase/templates/otp.html"
+
+[auth.email.template.recovery]
+subject = "Your Windex login code"
+content_path = "./supabase/templates/otp.html"
+
+[auth.email.template.email_change]
+subject = "Your Windex login code"
+content_path = "./supabase/templates/otp.html"
+
+[auth.email.template.reauthentication]
+subject = "Your Windex login code"
+content_path = "./supabase/templates/otp.html"
+
 # Disable Supabase platform-level JWT verification for all Edge Functions.
 # Each function does its own auth via getUser(token) in the handler code.
 # Platform verify_jwt uses different keys when linked to a remote project,
