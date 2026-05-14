@@ -1,16 +1,33 @@
 // POST /invite-player — Super-admin only.
 //
-// Creates a players row, optionally invites the user via Supabase Auth
-// (admin.inviteUserByEmail), and assigns them to one or more groups with a
-// per-group role. The new auth user (if invited) is auto-linked to the
-// players row by migration 020's link_player_on_auth_signup() trigger on
-// first sign-in. If the email already has an auth user, the invite step is
-// skipped — the trigger or migration's backfill has already linked them.
+// Creates a players row, optionally invites the user via the OTP code flow,
+// and assigns them to one or more groups with a per-group role. The new
+// auth user (if invited) is auto-linked to the players row by migration
+// 020's link_player_on_auth_signup() trigger on auth.users INSERT. If the
+// email already has an auth user, the invite step is skipped and the
+// existing auth user is linked manually.
+//
+// As of the 2026-05-14 cutover, this function no longer uses
+// admin.auth.admin.inviteUserByEmail (which embeds a clickable magic-link
+// URL in the email and is vulnerable to email-security-scanner and iOS
+// Mail prefetch consumption). The invite step now does:
+//
+//   1. admin.auth.admin.createUser({ email, email_confirm: false,
+//                                    user_metadata: { display_name } })
+//      Creates auth.users without sending an email. The
+//      link_player_on_auth_signup trigger fires AFTER INSERT and links the
+//      players row that this function just inserted (by case-insensitive
+//      email match).
+//
+//   2. admin.auth.signInWithOtp({ email, options: { shouldCreateUser: false,
+//                                                   emailRedirectTo: undefined } })
+//      Sends the OTP code email via the [auth.email.template.magic_link]
+//      template — identical body to the returning-user sign-in email. No
+//      clickable URL in the email.
 //
 // Auth: handler-side getUser(token) + am_i_super_admin() RPC. Deployed with
 // verify_jwt = false (matches every other function in this project — see
-// config.toml; platform-level verification was disabled deliberately
-// because it failed against linked projects).
+// config.toml).
 //
 // Request body:
 //   {
@@ -24,7 +41,7 @@
 //   }
 //
 // Responses:
-//   200 { player, groups_assigned, invite_sent, already_had_auth }
+//   200 { player, groups_assigned, invite_sent, already_had_auth, warning? }
 //   400 { error: "...validation message..." }
 //   401 { error: "Unauthorized" }
 //   403 { error: "Super admin only" }
@@ -201,6 +218,9 @@ serve(async (req) => {
   }
 
   // ── Insert players row ──────────────────────────────────────────────────
+  // Order matters: the players row must exist BEFORE we call createUser so
+  // that link_player_on_auth_signup (migration 020) finds a pending email
+  // match when the auth.users INSERT trigger fires.
   const playerId = newPlayerId();
   const nowIso = new Date().toISOString();
   const { data: playerInsert, error: pErr } = await admin
@@ -242,15 +262,16 @@ serve(async (req) => {
   // ── Optional invite ─────────────────────────────────────────────────────
   let invite_sent = false;
   let already_had_auth = false;
+  let warning: string | null = null;
 
   if (send_invite) {
     let existingUserId: string | null = null;
     try {
       existingUserId = await findExistingAuthUser(admin, email);
     } catch (err) {
-      // Treat lookup failure as "unknown" — fall through to the invite call,
-      // which will surface its own duplicate-user error if needed.
-      console.warn("listUsers lookup failed, falling through to invite:", err);
+      // Treat lookup failure as "unknown" — fall through to the createUser
+      // call, which will surface its own duplicate-user error if needed.
+      console.warn("listUsers lookup failed, falling through to createUser:", err);
     }
 
     if (existingUserId) {
@@ -267,23 +288,42 @@ serve(async (req) => {
         console.warn("Manual link of pre-existing auth user failed:", linkErr.message);
       }
     } else {
-      const { error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
-        data: { display_name },
-        redirectTo: "https://windexgolf.com",
+      // Step 1: create the auth.users row without sending an email. The
+      // link_player_on_auth_signup trigger fires AFTER INSERT and links the
+      // players row we just inserted (by case-insensitive email match).
+      const { error: createErr } = await admin.auth.admin.createUser({
+        email,
+        email_confirm: false,
+        user_metadata: { display_name },
       });
-      if (invErr) {
+      if (createErr) {
         // Don't roll back the player; admin can re-trigger an invite from
-        // the Players page. Surface the error so the UI can show it.
+        // the Players page (Send Invite). Surface the error so the UI can
+        // show it.
         return json({
-          error: "Player created, but invite send failed",
-          details: invErr.message,
+          error: "Player created, but createUser failed",
+          details: createErr.message,
           player: playerInsert,
           groups_assigned: group_assignments.length,
           invite_sent: false,
           already_had_auth: false,
         }, 500);
       }
-      invite_sent = true;
+
+      // Step 2: trigger the OTP code email. shouldCreateUser:false because
+      // we just created the user; emailRedirectTo:undefined so the email
+      // body contains only {{ .Token }} and no clickable URL.
+      const { error: otpErr } = await admin.auth.signInWithOtp({
+        email,
+        options: { shouldCreateUser: false, emailRedirectTo: undefined },
+      });
+      if (otpErr) {
+        // Auth user exists and the trigger has linked the player — only
+        // the email send failed. Admin can use Send Again to retry.
+        warning = `Auth user created but OTP email failed: ${otpErr.message}. Use Send Again to retry.`;
+      } else {
+        invite_sent = true;
+      }
     }
   }
 
@@ -292,5 +332,6 @@ serve(async (req) => {
     groups_assigned: group_assignments.length,
     invite_sent,
     already_had_auth,
+    ...(warning ? { warning } : {}),
   }, 200);
 });

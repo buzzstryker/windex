@@ -1,15 +1,30 @@
 // POST /send-invite — Super-admin only.
 //
-// Triggers a Supabase OTP invite for an existing players row that has no
-// auth.users link yet (`players.user_id IS NULL`). Companion to
-// invite-player: invite-player creates a player AND optionally invites;
-// send-invite covers the case where a player was created without the
-// invite step and the admin wants to send one later.
+// First-invite path for a player whose row exists with no auth.users link
+// (`players.user_id IS NULL`). Sibling of send-invite-again (re-invite path)
+// and invite-player (combined create-player-and-invite path).
 //
-// Auth: handler-side getUser(token) + am_i_super_admin() RPC. Deployed
-// with verify_jwt = false (matches every other function in this project —
-// see config.toml; platform-level verification was disabled deliberately
-// because it failed against linked projects).
+// As of the 2026-05-14 cutover, this function no longer issues a magic-link
+// invite via inviteUserByEmail. Instead it does a two-step:
+//
+//   1. admin.auth.admin.createUser({ email, email_confirm: false,
+//                                    user_metadata: { display_name } })
+//      Creates the auth.users row without sending any email. The
+//      link_player_on_auth_signup trigger (migration 020) fires AFTER INSERT
+//      on auth.users and links the matching pending players row.
+//
+//   2. admin.auth.signInWithOtp({ email, options: { shouldCreateUser: false,
+//                                                   emailRedirectTo: undefined } })
+//      Sends a code-only OTP email via the [auth.email.template.magic_link]
+//      template — identical to the email a returning user gets when signing
+//      in. No clickable URL, so email-security scanners and iOS Mail
+//      prefetchers cannot consume the token. The user must type the code
+//      into the app to authenticate, which sets email_confirmed_at and
+//      last_sign_in_at exactly when the human actually signs in.
+//
+// Auth: handler-side getUser(token) + am_i_super_admin() RPC. Deployed with
+// verify_jwt = false (matches every other function in this project — see
+// config.toml).
 //
 // Request body (JSON):
 //   { "player_id": "..." }
@@ -17,24 +32,20 @@
 // Pipeline:
 //   1. Super-admin gate.
 //   2. Load player by id. 404 if not found.
-//   3. Reject if player.user_id IS NOT NULL → 409 "already linked" (also
-//      catches the race where another admin linked between page load and
-//      click).
+//   3. Reject if player.user_id IS NOT NULL → 409 "already linked".
 //   4. Reject if email is null/empty/invalid → 400.
-//   5. Check for an existing auth.users row by email (paginated listUsers
-//      — matches invite-player's findExistingAuthUser pattern).
-//      a. If found → manually link the player row (mirrors invite-player's
-//         "already_had_auth" branch). Return success without sending email.
-//      b. If not found → admin.inviteUserByEmail. The trigger from
-//         migration 020 fires AFTER INSERT on auth.users and links the
-//         player row by email match. Re-read players.user_id to confirm.
-//   6. Return { invite_sent, already_had_auth, linked, player }. UI
-//      surfaces "linked: false" as "invite sent but link pending — refresh"
-//      so trigger failures (email casing/whitespace mismatch) don't get
-//      silently swallowed.
+//   5. Check for an existing auth.users row by email.
+//      a. If found → manually link the player row, no email sent. Response
+//         marks already_had_auth=true.
+//      b. If not found → createUser (trigger auto-links the player) then
+//         signInWithOtp (sends the OTP code email).
+//   6. Re-read players.user_id to confirm the trigger fired and return the
+//      final row. invite_sent=false / linked=true with a warning is the
+//      degenerate state if createUser succeeded but the OTP send failed —
+//      admin can recover by clicking Send Again.
 //
 // Responses:
-//   200 { ok: true, invite_sent, already_had_auth, linked, player }
+//   200 { ok: true, invite_sent, already_had_auth, linked, player, warning? }
 //   400 { error: "..." }       — missing/invalid email, malformed body
 //   401 { error: "Unauthorized" }
 //   403 { error: "Super admin only" }
@@ -150,7 +161,7 @@ serve(async (req) => {
     return json({ error: `Player email '${playerRow.email}' is invalid` }, 400);
   }
 
-  // ── Find existing auth user, or invite ───────────────────────────────────
+  // ── Find existing auth user, or createUser + OTP send ────────────────────
   let existingAuthId: string | null = null;
   try {
     existingAuthId = await findExistingAuthUser(admin, email);
@@ -163,11 +174,12 @@ serve(async (req) => {
 
   let invite_sent = false;
   let already_had_auth = false;
+  let warning: string | null = null;
 
   if (existingAuthId) {
     // Auth user exists but the player isn't linked. Manually link rather
-    // than re-inviting — matches invite-player's behavior, avoids a
-    // pointless email blast at someone who already has an account.
+    // than re-sending — avoids a pointless email blast at someone who
+    // already has an account. Matches the prior magic-link flow's behavior.
     already_had_auth = true;
     const { error: linkErr } = await admin
       .from("players")
@@ -181,22 +193,45 @@ serve(async (req) => {
       }, 500);
     }
   } else {
-    const { error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
-      data: { display_name: playerRow.display_name },
-      redirectTo: "https://windexgolf.com",
+    // Step 1: create the auth.users row without sending an email. The
+    // link_player_on_auth_signup trigger fires AFTER INSERT and links the
+    // matching pending players row by email.
+    const { error: createErr } = await admin.auth.admin.createUser({
+      email,
+      email_confirm: false,
+      user_metadata: { display_name: playerRow.display_name },
     });
-    if (invErr) {
-      return json({ error: "Invite send failed", details: invErr.message }, 500);
+    if (createErr) {
+      return json({
+        error: "createUser failed",
+        details: createErr.message,
+      }, 500);
     }
-    invite_sent = true;
+
+    // Step 2: trigger the OTP code email. Uses the same template the
+    // returning-user sign-in flow uses ([auth.email.template.magic_link],
+    // overridden to a code-only body). shouldCreateUser:false because we
+    // just created the user above; emailRedirectTo:undefined so no
+    // ConfirmationURL is embedded in the email body.
+    const { error: otpErr } = await admin.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false, emailRedirectTo: undefined },
+    });
+    if (otpErr) {
+      // The auth.users row exists and the trigger has linked the player —
+      // only the email send failed (rate limit, SMTP outage, etc.). Don't
+      // delete the auth user; the admin can use Send Again to retry the
+      // email. Surface as 200 with invite_sent=false + warning.
+      warning = `Auth user created but OTP email failed: ${otpErr.message}. Use Send Again to retry.`;
+    } else {
+      invite_sent = true;
+    }
   }
 
   // ── Confirm link landed ──────────────────────────────────────────────────
-  // The link_player_on_auth_signup trigger from migration 020 fires AFTER
-  // INSERT on auth.users — which for inviteUserByEmail is invite time, not
-  // first sign-in. By the time the API call returns, the trigger should
-  // have run. Re-read to surface trigger failures (email casing/whitespace
-  // mismatch) rather than silently succeed.
+  // The trigger fires AFTER INSERT on auth.users (or for the already_had_auth
+  // branch, we just did the UPDATE above). Re-read to surface trigger
+  // failures (email casing/whitespace mismatch) rather than silently succeed.
   const { data: post, error: postErr } = await admin
     .from("players")
     .select("id, display_name, email, user_id")
@@ -213,5 +248,6 @@ serve(async (req) => {
     already_had_auth,
     linked,
     player: post ?? playerRow,
+    ...(warning ? { warning } : {}),
   }, 200);
 });
