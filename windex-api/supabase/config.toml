@@ -43,10 +43,23 @@ enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
 enable_signup = true
 
+# `enable_confirmations = true` is required for the OTP-code invite flow
+# (2026-05-14). Previously `false` from the magic-link era, where a magic-link
+# click was simultaneously the email confirmation AND the sign-in. Under that
+# config, GoTrue exposes `mailer_autoconfirm: true`, and any `signInWithOtp`
+# call against an unconfirmed user triggers an immediate auto-confirm + auto-
+# sign-in side effect — the user's `email_confirmed_at` and `last_sign_in_at`
+# get populated and a session is created BEFORE the human types the OTP code.
+# That defeats the entire point of code-only OTP. With confirmations enabled,
+# the OTP send is just a send; verifyOtp does the actual confirmation work
+# when the human types the code. The production dashboard's
+# Authentication → Providers → Email → "Confirm email" toggle was flipped to
+# ON at the same time as this commit (dashboard config is the source of truth;
+# this file mirrors it for local dev).
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
-enable_confirmations = false
+enable_confirmations = true
 max_frequency = "60s"
 otp_length = 6
 otp_expiry = 3600
