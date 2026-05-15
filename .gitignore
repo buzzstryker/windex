@@ -13,6 +13,9 @@ supabase/.temp/
 .DS_Store
 Thumbs.db
 
+# Office lock files (created by Word/Excel/etc. when opening files in-place)
+~$*
+
 # Windows shell artifacts (repo root)
 /dir
 /nul
