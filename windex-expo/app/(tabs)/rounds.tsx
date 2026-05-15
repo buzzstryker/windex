@@ -162,17 +162,20 @@ export default function RoundsScreen() {
 
       {loadingEvents ? (
         <ActivityIndicator style={styles.spinner} size="large" />
-      ) : selectedGroup && events.length === 0 && !error ? (
-        <ThemedText style={[styles.empty, { color: muted }]}>
-          No rounds found.
-        </ThemedText>
       ) : null}
 
       <FlatList
         data={events}
         keyExtractor={(item) => item.id}
         renderItem={renderRoundCard}
-        ListHeaderComponent={events.length > 0 ? listHeader : null}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={
+          !loadingEvents && selectedGroup && !error ? (
+            <ThemedText style={[styles.empty, { color: muted }]}>
+              No rounds found.
+            </ThemedText>
+          ) : null
+        }
         contentContainerStyle={styles.listContent}
         refreshing={loadingEvents}
         onRefresh={refreshData}
