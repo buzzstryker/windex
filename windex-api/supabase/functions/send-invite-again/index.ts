@@ -1,14 +1,22 @@
 // POST /send-invite-again — Super-admin only.
 //
-// Re-sends the Supabase invite email to a player who was already invited but
-// has not yet confirmed their email / signed in. Sibling to send-invite:
-// where send-invite covers the first invite (player.user_id IS NULL),
-// send-invite-again covers the "invited but never followed through" state
-// (player.user_id IS NOT NULL + auth.users row is unconfirmed).
+// Re-sends the OTP code email to a player who was already invited but has
+// not yet confirmed their email / signed in. Sibling to send-invite (the
+// first-invite path); this function targets the "invited but never
+// followed through" state (player.user_id IS NOT NULL + auth.users row is
+// unconfirmed).
+//
+// As of the 2026-05-14 cutover, this function no longer issues a magic-link
+// invite via inviteUserByEmail. The auth.users row already exists (that is
+// the precondition for this function), so all we do is call
+// admin.auth.signInWithOtp to trigger a fresh OTP code email via the same
+// [auth.email.template.magic_link] template the returning-user sign-in
+// flow uses. No clickable URL ever lands in the user's inbox, so email-
+// security scanners and iOS Mail prefetchers cannot consume the token
+// before the human types it in.
 //
 // Auth: handler-side getUser(token) + am_i_super_admin() RPC. Deployed with
-// verify_jwt = false (matches project pattern — platform-level verification
-// is disabled because of linked-project key mismatches).
+// verify_jwt = false (matches project pattern).
 //
 // Request body (JSON):
 //   { "player_id": "..." }
@@ -23,14 +31,13 @@
 //   5. Reject if already signed in (email_confirmed_at OR last_sign_in_at) —
 //      409 "already signed in". Active users don't need re-invites.
 //   6. Email must be non-empty / valid (400).
-//   7. Call admin.inviteUserByEmail — empirically verified 2026-05-13 to
-//      return 200 + update invited_at on an existing unconfirmed user, and
-//      to send a fresh invite email (Resend SMTP, same Windex OTP template).
-//   8. Re-read auth.users to confirm invited_at advanced; return that
-//      timestamp so the UI can show what actually happened.
+//   7. Call admin.auth.signInWithOtp({ email, options: { shouldCreateUser:
+//      false, emailRedirectTo: undefined } }). shouldCreateUser:false because
+//      the user already exists; emailRedirectTo:undefined so no
+//      ConfirmationURL is embedded in the email body.
 //
 // Responses:
-//   200 { ok: true, sent_at, invited_at, player }
+//   200 { ok: true, sent_at, player }
 //   400 { error: "..." }       — missing player_id / no email / invalid email
 //   401 { error: "Unauthorized" }
 //   403 { error: "Super admin only" }
@@ -153,39 +160,23 @@ serve(async (req) => {
     }, 409);
   }
 
-  // ── Re-invite ────────────────────────────────────────────────────────────
-  // Empirically verified 2026-05-13: inviteUserByEmail on an existing
-  // unconfirmed user returns 200, updates invited_at to now, sends a fresh
-  // invite email (Resend SMTP via the Windex OTP template), and invalidates
-  // the prior invite token (Supabase regenerates on each call).
+  // ── Re-send OTP ──────────────────────────────────────────────────────────
+  // signInWithOtp triggers a fresh OTP code email via the same template the
+  // returning-user sign-in flow uses ([auth.email.template.magic_link],
+  // overridden to a code-only body). No ConfirmationURL is embedded so
+  // email-security scanners cannot consume the token via a GET prefetch.
   const sentAt = new Date().toISOString();
-  const { error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { display_name: playerRow.display_name },
-    redirectTo: "https://windexgolf.com",
+  const { error: otpErr } = await admin.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false, emailRedirectTo: undefined },
   });
-  if (invErr) {
-    return json({ error: "inviteUserByEmail failed", details: invErr.message }, 500);
+  if (otpErr) {
+    return json({ error: "signInWithOtp failed", details: otpErr.message }, 500);
   }
-
-  // ── Confirm invited_at advanced ──────────────────────────────────────────
-  const { data: postResult, error: postErr } = await admin.auth.admin.getUserById(playerRow.user_id);
-  if (postErr) {
-    // Best-effort; the send already happened. Return sent_at and a null
-    // invited_at so the UI can show a partial-success state.
-    return json({
-      ok: true,
-      sent_at: sentAt,
-      invited_at: null,
-      player: playerRow,
-      warning: `Post-invite re-read failed: ${postErr.message}`,
-    }, 200);
-  }
-  const newInvitedAt = postResult?.user?.invited_at ?? null;
 
   return json({
     ok: true,
     sent_at: sentAt,
-    invited_at: newInvitedAt,
     player: playerRow,
   }, 200);
 });
