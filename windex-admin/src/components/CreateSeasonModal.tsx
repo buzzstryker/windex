@@ -72,6 +72,22 @@ export function CreateSeasonModal({
     return { start, end };
   };
 
+  // Seed-season default year. When a group has NO seasons yet, the first
+  // season must CONTAIN today rather than project into the future (the bug
+  // that left "Adam TBD" with only future-dated seasons). Given the group's
+  // season_start_month, today falls in this calendar year's window iff
+  // today's month >= ssm; otherwise the current window started last year.
+  // Groups that already have seasons are unchanged — they keep extending the
+  // existing chain via defaultYear (maxEnd year + 1).
+  const resolveSeedYear = (monthHint: number | null): number => {
+    if (existingSeasons.length > 0) return defaultYear;
+    const today = new Date();
+    const todayMonth = today.getMonth() + 1; // 1-12
+    const todayYear = today.getFullYear();
+    const ssm = monthHint ?? 1; // mirror computeDefaults' January fallback
+    return todayMonth >= ssm ? todayYear : todayYear - 1;
+  };
+
   // Reset on close so reopening is clean.
   useEffect(() => {
     if (!open) {
@@ -96,7 +112,7 @@ export function CreateSeasonModal({
       .then((monthHint) => {
         if (cancelled) return;
         setSsm(monthHint);
-        const y = defaultYear;
+        const y = resolveSeedYear(monthHint);
         const { start, end } = computeDefaults(y, monthHint);
         setYear(y);
         setStartDate(start);
@@ -105,8 +121,9 @@ export function CreateSeasonModal({
       })
       .catch((e) => {
         if (cancelled) return;
-        // Soft-fail: defaults to January with current year
-        const y = defaultYear;
+        // Soft-fail: no schedule hint → resolveSeedYear yields a
+        // today-containing January window (or the chain year if seasons exist).
+        const y = resolveSeedYear(null);
         const { start, end } = computeDefaults(y, null);
         setYear(y);
         setStartDate(start);
