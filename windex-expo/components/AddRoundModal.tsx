@@ -227,7 +227,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
 
               {/* Tournament toggle */}
               <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Tournament Round</Text>
+                <Text style={styles.toggleLabel}>Signature Event</Text>
                 <Switch
                   value={tournament}
                   onValueChange={setTournament}
@@ -346,7 +346,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
                 disabled={!isValid || submitting}
               >
                 <Text style={styles.submitBtnText}>
-                  {submitting ? 'Submitting...' : tournament ? 'Submit Tournament' : 'Submit Round'}
+                  {submitting ? 'Submitting...' : tournament ? 'Submit Signature Event' : 'Submit Round'}
                 </Text>
               </Pressable>
             </View>

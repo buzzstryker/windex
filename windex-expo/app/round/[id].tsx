@@ -434,7 +434,7 @@ export default function RoundDetailScreen() {
           {event.is_tournament === 1 && (
             <View style={styles.tournamentBanner}>
               <Text style={styles.tournamentBannerText}>
-                {'\uD83C\uDFC6'} Tournament Round — {event.tournament_buyin ?? 0} pt buy-in
+                {'\uD83C\uDFC6'} Signature Event — {event.tournament_buyin ?? 0} pt buy-in
               </Text>
             </View>
           )}

@@ -44,7 +44,7 @@ export function RoundCard({ event, scores, onPress }: Props) {
           <View>
             <Text style={[styles.cardDate, { color: colors.tint }]}>{dateLabel}</Text>
             {event.is_tournament ? (
-              <Text style={styles.buyinLabel}>{event.tournament_buyin ?? 0} pt buy-in</Text>
+              <Text style={styles.buyinLabel}>Signature Event — {event.tournament_buyin ?? 0} pt buy-in</Text>
             ) : null}
           </View>
           {event.is_signature_event ? (
