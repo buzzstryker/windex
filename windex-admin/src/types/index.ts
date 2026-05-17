@@ -85,6 +85,8 @@ export interface Player {
   id: string;
   display_name: string;
   is_active?: number;
+  /** Non-null = player retired/resigned (migration 029). Not returned by the /players Edge Function, hence optional. */
+  retired_at?: string | null;
 }
 
 /** Group (league unit). */
