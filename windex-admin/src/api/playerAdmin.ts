@@ -30,6 +30,12 @@ export interface PlayerDetail {
   photo_url: string | null;
   is_active: number;
   /**
+   * Non-null = player retired/resigned at this time (migration 029).
+   * Single-axis retirement: is_active stays 1 so history/standings keep
+   * showing them; only operational lists filter on retired_at.
+   */
+  retired_at: string | null;
+  /**
    * auth.users.id link. NULL = player exists but has no auth account yet
    * (i.e., eligible for an OTP invite via the send-invite Edge Function).
    */
@@ -52,17 +58,29 @@ export interface PlayerWithMembership extends PlayerDetail {
  * List every player in the table — used by the Create Group admin picker.
  * RLS (`players_select` in migration 015) is `USING (true)` for authenticated
  * users, so any signed-in admin can read this. Sorted by display_name.
+ * Retired players (migration 029) are excluded — they can't be added to a
+ * group until unretired from the Players page.
  */
 export async function listAllPlayers(): Promise<PlayerDetail[]> {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/players?select=id,display_name,full_name,email,venmo_handle,photo_url,is_active,user_id&order=display_name.asc`,
+    `${SUPABASE_URL}/rest/v1/players?retired_at=is.null&select=id,display_name,full_name,email,venmo_handle,photo_url,is_active,retired_at,user_id&order=display_name.asc`,
     { headers: headers() }
   );
   if (!res.ok) throw new Error(`Failed to fetch players: ${res.status}`);
   return res.json();
 }
 
-export async function listPlayersWithMembership(groupId: string): Promise<PlayerWithMembership[]> {
+/**
+ * Members of a group joined to their player record. `opts.retired` selects
+ * which retirement bucket (migration 029): default/false = operational view
+ * (retired_at IS NULL); true = the Retired tab (retired_at IS NOT NULL).
+ * The retirement filter is applied on the players query, so a member whose
+ * player is in the other bucket is naturally dropped from the result.
+ */
+export async function listPlayersWithMembership(
+  groupId: string,
+  opts?: { retired?: boolean }
+): Promise<PlayerWithMembership[]> {
   // Fetch group_members for this group
   const membersRes = await fetch(
     `${SUPABASE_URL}/rest/v1/group_members?group_id=eq.${encodeURIComponent(groupId)}&select=id,group_id,player_id,role,is_active`,
@@ -76,8 +94,9 @@ export async function listPlayersWithMembership(groupId: string): Promise<Player
   // Fetch player details for all member player_ids
   const playerIds = members.map((m) => m.player_id);
   const inList = playerIds.map((id) => `"${id}"`).join(',');
+  const retiredFilter = opts?.retired ? '&retired_at=not.is.null' : '&retired_at=is.null';
   const playersRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/players?id=in.(${inList})&select=id,display_name,full_name,email,venmo_handle,photo_url,is_active,user_id`,
+    `${SUPABASE_URL}/rest/v1/players?id=in.(${inList})${retiredFilter}&select=id,display_name,full_name,email,venmo_handle,photo_url,is_active,retired_at,user_id`,
     { headers: headers() }
   );
   if (!playersRes.ok) throw new Error(`Failed to fetch players: ${playersRes.status}`);
@@ -105,7 +124,7 @@ export async function listPlayersWithMembership(groupId: string): Promise<Player
  */
 export async function updatePlayer(
   playerId: string,
-  updates: Partial<Pick<PlayerDetail, 'display_name' | 'full_name' | 'email' | 'venmo_handle' | 'is_active'>>
+  updates: Partial<Pick<PlayerDetail, 'display_name' | 'full_name' | 'email' | 'venmo_handle' | 'is_active' | 'retired_at'>>
 ): Promise<void> {
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/players?id=eq.${encodeURIComponent(playerId)}`,

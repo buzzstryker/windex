@@ -118,15 +118,22 @@ export async function getActiveMemberCount(groupId: string): Promise<number> {
   if (!base || !token) return 0;
   try {
     const anonKey = getSupabaseAnonKey();
+    const reqHeaders = { Authorization: `Bearer ${token}`, apikey: anonKey || token };
+    const memRes = await fetch(
+      `${base}/rest/v1/group_members?group_id=eq.${encodeURIComponent(groupId)}&is_active=eq.1&select=player_id`,
+      { headers: reqHeaders }
+    );
+    if (!memRes.ok) return 0;
+    const mem = (await memRes.json()) as { player_id: string }[];
+    if (!Array.isArray(mem) || mem.length === 0) return 0;
+    // Retirement lives on players.retired_at; group_members has no FK to
+    // players so we can't embed-filter it — resolve in a second query and
+    // count only non-retired active members.
+    const ids = [...new Set(mem.map((m) => m.player_id))];
+    const inList = ids.map((id) => `"${id}"`).join(',');
     const res = await fetch(
-      `${base}/rest/v1/group_members?group_id=eq.${encodeURIComponent(groupId)}&is_active=eq.1&select=id`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          apikey: anonKey || token,
-          Prefer: 'count=exact',
-        },
-      }
+      `${base}/rest/v1/players?id=in.(${inList})&retired_at=is.null&select=id`,
+      { headers: { ...reqHeaders, Prefer: 'count=exact' } }
     );
     if (!res.ok) return 0;
     const count = res.headers.get('content-range');
@@ -156,6 +163,8 @@ export type PlayerDetail = {
   email: string | null;
   venmo_handle: string | null;
   is_active: number;
+  /** Non-null = player retired/resigned (migration 029). Operational pickers hide these. */
+  retired_at: string | null;
 };
 
 export type MemberWithPlayer = GroupMember & { player: PlayerDetail };
@@ -169,7 +178,7 @@ export async function listGroupMembers(groupId: string): Promise<MemberWithPlaye
   try {
     const [membersRes, playersRes] = await Promise.all([
       fetch(`${base}/rest/v1/group_members?group_id=eq.${encodeURIComponent(groupId)}&select=id,group_id,player_id,role,is_active`, { headers }),
-      fetch(`${base}/rest/v1/players?select=id,display_name,full_name,email,venmo_handle,is_active`, { headers }),
+      fetch(`${base}/rest/v1/players?select=id,display_name,full_name,email,venmo_handle,is_active,retired_at`, { headers }),
     ]);
     if (!membersRes.ok || !playersRes.ok) return [];
     const members: GroupMember[] = await membersRes.json();

@@ -60,7 +60,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
     setLoadingMembers(true);
     listGroupMembers(selectedGroup.id)
       .then((m) => {
-        setMembers(m.filter((mem) => mem.is_active === 1));
+        setMembers(m.filter((mem) => mem.is_active === 1 && mem.player.retired_at == null));
       })
       .catch(() => setMembers([]))
       .finally(() => setLoadingMembers(false));

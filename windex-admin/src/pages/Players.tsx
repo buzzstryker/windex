@@ -38,12 +38,13 @@ type InviteMode = 'first' | 'again';
 // RPC. Returns null when we don't have enough info yet (RPC still loading
 // for a linked player). The "not invited" state is derivable from the row
 // alone, so it renders immediately.
-type StatusKey = 'not_invited' | 'invited' | 'signed_in';
+type StatusKey = 'not_invited' | 'invited' | 'signed_in' | 'retired';
 
 function deriveStatus(
   player: PlayerWithMembership,
   authStatus: PlayerAuthStatus | null
 ): StatusKey | null {
+  if (player.retired_at) return 'retired';
   if (!player.user_id) return 'not_invited';
   if (!authStatus) return null;
   return authStatus.has_signed_in ? 'signed_in' : 'invited';
@@ -53,6 +54,7 @@ const STATUS_PILL: Record<StatusKey, { label: string; color: string; bg: string;
   not_invited: { label: 'not invited', color: '#616161', bg: '#f5f5f5', border: '#e0e0e0' },
   invited:     { label: 'invited',     color: '#f57c00', bg: '#fff8e1', border: '#ffe0b2' },
   signed_in:   { label: 'signed in',   color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7' },
+  retired:     { label: 'retired',     color: '#616161', bg: '#eeeeee', border: '#bdbdbd' },
 };
 
 function StatusPill({ status }: { status: StatusKey | null }) {
@@ -80,6 +82,7 @@ function StatusPill({ status }: { status: StatusKey | null }) {
 export function Players() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupId, setGroupId] = useState('');
+  const [tab, setTab] = useState<'active' | 'retired'>('active');
   const [players, setPlayers] = useState<PlayerWithMembership[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +103,12 @@ export function Players() {
   const [inviteMode, setInviteMode] = useState<InviteMode>('first');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  // Retire / unretire flow (migration 029). Single-axis: only retired_at is
+  // written; is_active is left untouched so history/standings stay correct.
+  const [retireTarget, setRetireTarget] = useState<PlayerWithMembership | null>(null);
+  const [retireMode, setRetireMode] = useState<'retire' | 'unretire'>('retire');
+  const [retiring, setRetiring] = useState(false);
+  const [retireError, setRetireError] = useState<string | null>(null);
 
   useEffect(() => {
     listGroups().then(setGroups).catch(() => {});
@@ -123,14 +132,14 @@ export function Players() {
     setLoading(true);
     setError(null);
     try {
-      const list = await listPlayersWithMembership(groupId);
+      const list = await listPlayersWithMembership(groupId, { retired: tab === 'retired' });
       setPlayers(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [groupId]);
+  }, [groupId, tab]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -207,6 +216,28 @@ export function Players() {
     }
   };
 
+  const handleConfirmRetire = async () => {
+    if (!retireTarget) return;
+    setRetiring(true);
+    setRetireError(null);
+    try {
+      await updatePlayer(retireTarget.id, {
+        retired_at: retireMode === 'retire' ? new Date().toISOString() : null,
+      });
+      setToast(
+        retireMode === 'retire'
+          ? `${retireTarget.display_name} retired — hidden from operational lists; scored rounds remain in standings.`
+          : `${retireTarget.display_name} unretired — back in operational lists.`
+      );
+      setRetireTarget(null);
+      load();
+    } catch (e) {
+      setRetireError(e instanceof Error ? e.message : 'Failed to update retirement');
+    } finally {
+      setRetiring(false);
+    }
+  };
+
   // ConfirmModal copy varies by mode; build it inline.
   const modalTitle = inviteMode === 'again' ? 'Send invite again' : 'Send invite';
   const modalConfirmLabel = inviteMode === 'again' ? 'Send again' : 'Send invite';
@@ -235,6 +266,25 @@ export function Players() {
           )}
         </div>
       </div>
+
+      {groupId && (
+        <div className="card" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            className={tab === 'active' ? 'btn btn-primary' : 'btn btn-secondary'}
+            onClick={() => { setTab('active'); setEditingId(null); }}
+            style={{ padding: '6px 14px' }}
+          >
+            Active
+          </button>
+          <button
+            className={tab === 'retired' ? 'btn btn-primary' : 'btn btn-secondary'}
+            onClick={() => { setTab('retired'); setEditingId(null); }}
+            style={{ padding: '6px 14px' }}
+          >
+            Retired
+          </button>
+        </div>
+      )}
 
       {isSuperAdmin && (
         <AddPlayerModal
@@ -291,6 +341,37 @@ export function Players() {
         )}
       </ConfirmModal>
 
+      <ConfirmModal
+        open={retireTarget !== null}
+        title={retireMode === 'retire' ? 'Retire player' : 'Unretire player'}
+        confirmLabel={retireMode === 'retire' ? 'Retire' : 'Unretire'}
+        busy={retiring}
+        errorMessage={retireError}
+        onCancel={() => { setRetireTarget(null); setRetireError(null); }}
+        onConfirm={handleConfirmRetire}
+      >
+        {retireTarget && retireMode === 'retire' && (
+          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+            <p style={{ margin: 0 }}>
+              Retire <strong>{retireTarget.display_name}</strong>?
+            </p>
+            <p style={{ margin: '12px 0 0', color: '#666', fontSize: 13 }}>
+              They will be hidden from operational lists (Players, group
+              pickers, Add Round) but their scored rounds remain in standings.
+              You can unretire them anytime from the Retired tab.
+            </p>
+          </div>
+        )}
+        {retireTarget && retireMode === 'unretire' && (
+          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
+            <p style={{ margin: 0 }}>
+              Unretire <strong>{retireTarget.display_name}</strong>? They will
+              reappear in operational lists and pickers.
+            </p>
+          </div>
+        )}
+      </ConfirmModal>
+
       {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} duration={5000} />}
 
       {loading && <LoadingSpinner />}
@@ -298,7 +379,7 @@ export function Players() {
       {saveMsg && <div style={{ padding: '8px 16px', margin: '8px 0', background: saveMsg === 'Saved' ? '#e8f5e9' : '#ffebee', borderRadius: 4 }}>{saveMsg}</div>}
 
       {!loading && groupId && players.length === 0 && (
-        <EmptyState message="No players in this group." />
+        <EmptyState message={tab === 'retired' ? 'No retired players in this group.' : 'No players in this group.'} />
       )}
 
       {players.length > 0 && (
@@ -332,10 +413,13 @@ export function Players() {
                       key={p.id}
                       player={p}
                       isSuperAdmin={isSuperAdmin}
+                      tab={tab}
                       authStatus={authStatus.get(p.id) ?? null}
                       onEdit={() => { setEditingId(p.id); setSaveMsg(null); }}
                       onSendInvite={() => { setInviteMode('first'); setInviteError(null); setInviteTarget(p); }}
                       onSendInviteAgain={() => { setInviteMode('again'); setInviteError(null); setInviteTarget(p); }}
+                      onRetire={() => { setRetireMode('retire'); setRetireError(null); setRetireTarget(p); }}
+                      onUnretire={() => { setRetireMode('unretire'); setRetireError(null); setRetireTarget(p); }}
                     />
               ))}
             </tbody>
@@ -349,17 +433,23 @@ export function Players() {
 function DisplayRow({
   player: p,
   isSuperAdmin,
+  tab,
   authStatus,
   onEdit,
   onSendInvite,
   onSendInviteAgain,
+  onRetire,
+  onUnretire,
 }: {
   player: PlayerWithMembership;
   isSuperAdmin: boolean;
+  tab: 'active' | 'retired';
   authStatus: PlayerAuthStatus | null;
   onEdit: () => void;
   onSendInvite: () => void;
   onSendInviteAgain: () => void;
+  onRetire: () => void;
+  onUnretire: () => void;
 }) {
   const linked = p.user_id !== null && p.user_id !== undefined;
   const emailOk = hasValidEmail(p.email);
@@ -374,12 +464,14 @@ function DisplayRow({
   //                        the RPC resolves so we don't surface "Send Again"
   //                        against someone who actually signed in already).
   //   showBadgeOnly      — fully active. No button.
-  const showSendInvite = isSuperAdmin && !linked;
+  // Invite affordances are operational-only — never offered on the Retired tab.
+  const showSendInvite = isSuperAdmin && !linked && tab === 'active';
   const showSendAgain =
     isSuperAdmin
     && linked
     && authStatus !== null
-    && !authStatus.has_signed_in;
+    && !authStatus.has_signed_in
+    && tab === 'active';
 
   const status = deriveStatus(p, authStatus);
 
@@ -415,6 +507,24 @@ function DisplayRow({
             style={{ padding: '4px 10px', fontSize: 12, marginRight: 4 }}
           >
             Send Again
+          </button>
+        )}
+        {isSuperAdmin && tab === 'active' && (
+          <button
+            className="btn btn-secondary"
+            onClick={onRetire}
+            style={{ padding: '4px 10px', fontSize: 12, marginRight: 4, color: '#c62828', borderColor: '#c62828' }}
+          >
+            Retire
+          </button>
+        )}
+        {isSuperAdmin && tab === 'retired' && (
+          <button
+            className="btn btn-secondary"
+            onClick={onUnretire}
+            style={{ padding: '4px 10px', fontSize: 12, marginRight: 4 }}
+          >
+            Unretire
           </button>
         )}
         <button className="btn btn-secondary" onClick={onEdit} style={{ padding: '4px 10px', fontSize: 12 }}>Edit</button>
