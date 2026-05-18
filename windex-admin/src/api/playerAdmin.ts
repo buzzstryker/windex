@@ -267,7 +267,7 @@ export async function sendInvite(playerId: string): Promise<SendInviteResponse> 
 }
 
 // =============================================================================
-// Player auth status (migration 027) + send-invite-again Edge Function
+// Player auth status (migration 027)
 // =============================================================================
 
 /**
@@ -304,55 +304,4 @@ export async function getPlayersAuthStatus(): Promise<Map<string, PlayerAuthStat
   }
   const rows: PlayerAuthStatus[] = await res.json();
   return new Map(rows.map((r) => [r.player_id, r]));
-}
-
-export interface SendInviteAgainResponse {
-  ok: true;
-  /** Server-side timestamp of when the re-invite was issued. */
-  sent_at: string;
-  /** auth.users.invited_at after the call. null if the post-read failed (warning included). */
-  invited_at: string | null;
-  player: {
-    id: string;
-    display_name: string;
-    email: string | null;
-    user_id: string | null;
-  };
-  warning?: string;
-}
-
-export class PlayerNotYetInvitedError extends Error {
-  constructor() {
-    super('Player has never been invited. Use Send Invite, not Send Again.');
-    this.name = 'PlayerNotYetInvitedError';
-  }
-}
-
-export class PlayerAlreadySignedInError extends Error {
-  constructor() {
-    super('Player has already signed in. No re-invite needed.');
-    this.name = 'PlayerAlreadySignedInError';
-  }
-}
-
-/**
- * POST /send-invite-again — re-sends the Supabase invite email to a player
- * who was invited but never confirmed/signed in. Super-admin gated server-side.
- * Translates the 409 responses into typed errors so the UI can show specific
- * remediation messages without parsing strings.
- */
-export async function sendInviteAgain(playerId: string): Promise<SendInviteAgainResponse> {
-  try {
-    return await apiFetch<SendInviteAgainResponse>('/send-invite-again', {
-      method: 'POST',
-      body: JSON.stringify({ player_id: playerId }),
-    });
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 409) {
-      const body = e.body as { reason?: string } | undefined;
-      if (body?.reason === 'not_yet_invited') throw new PlayerNotYetInvitedError();
-      if (body?.reason === 'already_signed_in') throw new PlayerAlreadySignedInError();
-    }
-    throw e;
-  }
 }
