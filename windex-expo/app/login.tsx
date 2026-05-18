@@ -23,17 +23,12 @@ export default function LoginScreen() {
   const muted = Colors[colorScheme ?? 'light'].icon;
   const border = colorScheme === 'dark' ? '#444' : '#ccc';
   const inputBg = colorScheme === 'dark' ? '#1c1c1e' : '#f5f5f5';
-  const { signInWithPassword, sendOtp, verifyOtp } = useAuth();
+  const { sendOtp, verifyOtp } = useAuth();
 
   // OTP flow state
   const [otpEmail, setOtpEmail] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpSent, setOtpSent] = useState(false);
-
-  // Password flow state
-  const [showPassword, setShowPassword] = useState(false);
-  const [pwEmail, setPwEmail] = useState('');
-  const [pwPassword, setPwPassword] = useState('');
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,21 +60,6 @@ export default function LoginScreen() {
       const { error: err } = await verifyOtp(otpEmail, otpCode);
       if (err) setError(err);
       // On success, onAuthStateChange fires SIGNED_IN → router navigates to standings
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onPasswordSignIn() {
-    setError(null);
-    if (!pwEmail.trim() || !pwPassword) {
-      setError('Enter email and password.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const { error: err } = await signInWithPassword(pwEmail, pwPassword);
-      if (err) setError(err);
     } finally {
       setBusy(false);
     }
@@ -186,54 +166,6 @@ export default function LoginScreen() {
             </>
           )}
 
-          {/* Password fallback */}
-          {!showPassword ? (
-            <Pressable onPress={() => setShowPassword(true)} style={styles.passwordToggle}>
-              <ThemedText style={[styles.passwordToggleText, { color: muted }]}>
-                Sign in with password instead
-              </ThemedText>
-            </Pressable>
-          ) : (
-            <View style={styles.section}>
-              <View style={styles.divider}>
-                <View style={[styles.dividerLine, { backgroundColor: border }]} />
-                <ThemedText style={[styles.dividerText, { color: muted }]}>or</ThemedText>
-                <View style={[styles.dividerLine, { backgroundColor: border }]} />
-              </View>
-              <TextInput
-                style={inputStyle}
-                placeholder="Email"
-                placeholderTextColor={muted}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                autoComplete="email"
-                textContentType="emailAddress"
-                value={pwEmail}
-                onChangeText={setPwEmail}
-              />
-              <TextInput
-                style={inputStyle}
-                placeholder="Password"
-                placeholderTextColor={muted}
-                secureTextEntry
-                autoComplete="password"
-                textContentType="password"
-                value={pwPassword}
-                onChangeText={setPwPassword}
-              />
-              <Pressable
-                style={[styles.buttonSecondary, { borderColor: border }, busy && styles.buttonDisabled]}
-                onPress={onPasswordSignIn}
-                disabled={busy}>
-                {busy ? (
-                  <ActivityIndicator />
-                ) : (
-                  <ThemedText type="defaultSemiBold">Sign in</ThemedText>
-                )}
-              </Pressable>
-            </View>
-          )}
-
           {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -277,23 +209,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 4,
   },
-  buttonSecondary: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 4,
-  },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#fff', fontWeight: '600', fontSize: 17 },
-  passwordToggle: { alignItems: 'center', marginTop: 8 },
-  passwordToggleText: { fontSize: 14 },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  dividerText: { paddingHorizontal: 12, fontSize: 13 },
   error: { color: '#c62828', marginTop: 16, fontSize: 15, lineHeight: 22 },
 });
