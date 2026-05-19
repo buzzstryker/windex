@@ -259,10 +259,23 @@ export default function GroupDetailScreen() {
             </View>
           </View>
 
-          {/* Current Season */}
-          {currentSeason ? (
-            <View style={styles.sectionContainer}>
+          {/* Current Season — the header row (title + Broadcast Notes pill)
+              renders unconditionally so the pill is available on every
+              group; only the season card below is gated on currentSeason. */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.seasonHeaderRow}>
               <Text style={styles.sectionTitle}>Current Season</Text>
+              <Pressable
+                style={[styles.broadcastPill, { marginTop: 0, alignSelf: 'auto' }]}
+                onPress={() =>
+                  router.push(
+                    `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
+                  )
+                }>
+                <Text style={styles.broadcastPillText}>Broadcast Notes</Text>
+              </Pressable>
+            </View>
+            {currentSeason ? (
               <View style={styles.seasonCard}>
                 <Text style={styles.seasonName}>
                   {seasonLabel(currentSeason.season)}
@@ -274,21 +287,7 @@ export default function GroupDetailScreen() {
                   {currentSeason.eventCount} round{currentSeason.eventCount !== 1 ? 's' : ''} played
                 </Text>
               </View>
-            </View>
-          ) : null}
-
-          {/* Broadcast Notes — always available on every group, independent
-              of whether a current (non-future) season exists. */}
-          <View style={styles.sectionContainer}>
-            <Pressable
-              style={styles.broadcastPill}
-              onPress={() =>
-                router.push(
-                  `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
-                )
-              }>
-              <Text style={styles.broadcastPillText}>Broadcast Notes</Text>
-            </Pressable>
+            ) : null}
           </View>
 
           {/* Previous Seasons */}
@@ -498,6 +497,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
     marginBottom: 10,
+  },
+  seasonHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
 
   /* Current season card */
