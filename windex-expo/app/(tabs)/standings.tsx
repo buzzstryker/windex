@@ -37,6 +37,26 @@ function fmt(n: number): string {
   return Math.abs(n).toLocaleString('en-US');
 }
 
+/**
+ * Render players.full_name as "F. Lastname". Middle names/initials are
+ * discarded. Single-token names render as-is. Null/blank → empty string.
+ *
+ *   "John Miller"        -> "J. Miller"
+ *   "Mary Jane Smith"    -> "M. Smith"
+ *   "Mary Smith-Jones"   -> "M. Smith-Jones"
+ *   "Cher"               -> "Cher"
+ *   "" / null / "   "    -> ""
+ *   "John Miller Jr."    -> "J. Jr."  (acceptable edge case)
+ */
+function formatInitialLastName(fullName?: string | null): string {
+  if (!fullName) return '';
+  const trimmed = fullName.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return '';
+  const tokens = trimmed.split(' ');
+  if (tokens.length === 1) return tokens[0];
+  return `${tokens[0].charAt(0).toUpperCase()}. ${tokens[tokens.length - 1]}`;
+}
+
 function formatPoints(points: number, dollarsPerPoint?: number | null): string {
   if (dollarsPerPoint) {
     const dollars = Math.abs(Math.round(points * dollarsPerPoint));
@@ -210,6 +230,13 @@ export default function StandingsScreen() {
           numberOfLines={1}
         >
           {item.player_name ?? item.player_id.slice(0, 8) + '\u2026'}
+        </ThemedText>
+        <ThemedText
+          style={styles.fullNameCol}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {formatInitialLastName(item.full_name)}
         </ThemedText>
         <View style={styles.wltCol}>
           <Text style={[styles.wltNum, { color: colors.positive }]}>{item.wins}</Text>
@@ -444,6 +471,7 @@ const styles = StyleSheet.create({
   },
   rankCol: { width: 30, textAlign: 'center', fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] as const },
   nameCol: { flex: 1, marginRight: 8 },
+  fullNameCol: { width: 100, marginRight: 8 },
   wltCol: { width: 95, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   wltNum: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
   wltSep: { fontSize: 14, fontVariant: ['tabular-nums'] },

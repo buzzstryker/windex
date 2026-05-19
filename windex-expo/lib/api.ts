@@ -295,6 +295,9 @@ export type StandingRow = {
   group_id: string;
   player_id: string;
   player_name?: string;
+  /** Full real name (e.g. "Joe Miller"); rendered as "F. Lastname" in the
+   *  Standings row. Comes from players.full_name via get-standings v7+. */
+  full_name?: string | null;
   rounds_played: number;
   wins: number;
   losses: number;

@@ -89,19 +89,23 @@ serve(async (req) => {
 
   const playerIds = [...new Set(standings.map((r) => r.player_id))];
   let playerNames: Record<string, string> = {};
+  let fullNames: Record<string, string | null> = {};
   if (playerIds.length > 0) {
     const { data: playerRows } = await supabase
       .from("players")
-      .select("id, display_name")
+      .select("id, display_name, full_name")
       .in("id", playerIds);
     for (const p of playerRows ?? []) {
-      playerNames[(p as { id: string }).id] = (p as { display_name: string }).display_name;
+      const row = p as { id: string; display_name: string; full_name: string | null };
+      playerNames[row.id] = row.display_name;
+      fullNames[row.id] = row.full_name;
     }
   }
 
   const standingsWithNames = standings.map((r) => ({
     ...r,
     player_name: playerNames[r.player_id] ?? null,
+    full_name: fullNames[r.player_id] ?? null,
   }));
 
   return new Response(JSON.stringify({ standings: standingsWithNames }), {
