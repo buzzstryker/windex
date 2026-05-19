@@ -273,18 +273,23 @@ export default function GroupDetailScreen() {
                 <Text style={styles.seasonRounds}>
                   {currentSeason.eventCount} round{currentSeason.eventCount !== 1 ? 's' : ''} played
                 </Text>
-                <Pressable
-                  style={styles.broadcastPill}
-                  onPress={() =>
-                    router.push(
-                      `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
-                    )
-                  }>
-                  <Text style={styles.broadcastPillText}>Broadcast Notes</Text>
-                </Pressable>
               </View>
             </View>
           ) : null}
+
+          {/* Broadcast Notes — always available on every group, independent
+              of whether a current (non-future) season exists. */}
+          <View style={styles.sectionContainer}>
+            <Pressable
+              style={styles.broadcastPill}
+              onPress={() =>
+                router.push(
+                  `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
+                )
+              }>
+              <Text style={styles.broadcastPillText}>Broadcast Notes</Text>
+            </Pressable>
+          </View>
 
           {/* Previous Seasons */}
           {previousSeasons.length > 0 ? (
