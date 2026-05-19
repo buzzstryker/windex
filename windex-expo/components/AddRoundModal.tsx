@@ -139,7 +139,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
     const v = scores[pid];
     return v !== undefined && v !== '' && !isNaN(parseFloat(v));
   });
-  const isValid = dateText && selectedPlayers.size > 0 && allScoresFilled
+  const isValid = dateText && selectedPlayers.size >= 2 && allScoresFilled
     && (!tournament || (buyInNum > 0 && poolBalanced));
 
   const handleDateChange = (text: string) => {
