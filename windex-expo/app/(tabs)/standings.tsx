@@ -470,10 +470,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16,
   },
   rankCol: { width: 30, textAlign: 'center', fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] as const },
-  // Display-name col holds its natural content width (always short — "FJ",
-  // "BLSmooth", "Dr. Chris"). flexShrink: 0 prevents it from being sacrificed
-  // when the row is tight; full-name col below absorbs the overflow instead.
-  nameCol: { flexShrink: 0, marginRight: 8 },
+  // Display-name col: FIXED width so the full_name column to its right
+  // starts at the same x on every row (not floating with each name's
+  // length). 100px fits the longest current display_name ("BLSmooth", 8
+  // chars) and the historically-cited "Doc Bübes" / "Dr. Chris" (9 chars)
+  // with headroom at default body font. flexShrink: 0 so it never gets
+  // crushed; the full-name column to the right absorbs any overflow.
+  nameCol: { width: 100, flexShrink: 0, marginRight: 8 },
   // Full-name col is the flexible cell: takes remaining row width and
   // truncates with ellipsis (ellipsizeMode="tail" on the Text) when names
   // are long. flex: 1 implies flexShrink: 1 by default.
