@@ -273,6 +273,15 @@ export default function GroupDetailScreen() {
                 <Text style={styles.seasonRounds}>
                   {currentSeason.eventCount} round{currentSeason.eventCount !== 1 ? 's' : ''} played
                 </Text>
+                <Pressable
+                  style={styles.broadcastPill}
+                  onPress={() =>
+                    router.push(
+                      `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
+                    )
+                  }>
+                  <Text style={styles.broadcastPillText}>Broadcast Notes</Text>
+                </Pressable>
               </View>
             </View>
           ) : null}
@@ -510,6 +519,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: OLIVE,
     fontWeight: '500',
+  },
+  broadcastPill: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: OLIVE,
+    backgroundColor: '#FFFFFF',
+  },
+  broadcastPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: OLIVE,
   },
 
   /* Previous seasons */

@@ -404,6 +404,29 @@ export async function generatePaymentRequests(leagueRoundId: string) {
   }>('/generate-payment-requests', { method: 'POST', body: JSON.stringify({ league_round_id: leagueRoundId }) });
 }
 
+/* --- Broadcast Notes --- */
+
+export type BroadcastNotesResponse = {
+  notes: string;
+  generated_at: string;
+  spotlight_names: string[];
+};
+
+/**
+ * Generate LLM playoff commentary for 2-6 players in a group. Caller must be
+ * an authenticated member of the group (enforced server-side). The Edge
+ * Function computes group-scoped stats and calls the Anthropic API.
+ */
+export async function generateBroadcastNotes(
+  groupId: string,
+  playerIds: string[]
+): Promise<BroadcastNotesResponse> {
+  return apiFetch<BroadcastNotesResponse>('/generate-broadcast-notes', {
+    method: 'POST',
+    body: JSON.stringify({ group_id: groupId, player_ids: playerIds }),
+  });
+}
+
 export function seasonLabel(s: Season): string {
   if (s.name) return s.name;
   if (!s.start_date) return s.id.slice(0, 8);
