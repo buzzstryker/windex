@@ -478,10 +478,16 @@ const styles = StyleSheet.create({
   // truncates with ellipsis (ellipsizeMode="tail" on the Text) when names
   // are long. flex: 1 implies flexShrink: 1 by default.
   fullNameCol: { flex: 1, marginRight: 8 },
-  wltCol: { width: 95, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  // Tightened from width:95 — typical content "82 / 5 / 0" is ~55-60px;
+  // 80 still covers two-digit/early three-digit values without truncation
+  // and stops wasting ~15px of internal centering padding.
+  wltCol: { width: 80, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   wltNum: { fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
   wltSep: { fontSize: 14, fontVariant: ['tabular-nums'] },
-  pointsCol: { width: 85, textAlign: 'right', fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  // Tightened from width:85 — textAlign:right means any extra width
+  // accumulates as left-side gap before the number. 70 fits "-$9,999" worst
+  // case and reclaims ~15px for the flexible full_name column.
+  pointsCol: { width: 70, textAlign: 'right', fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
 
   // Season picker modal
   modalWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
