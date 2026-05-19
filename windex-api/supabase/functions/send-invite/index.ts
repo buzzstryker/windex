@@ -4,23 +4,39 @@
 // (`players.user_id IS NULL`). Sibling of send-invite-again (re-invite path)
 // and invite-player (combined create-player-and-invite path).
 //
-// As of the 2026-05-14 cutover, this function no longer issues a magic-link
-// invite via inviteUserByEmail. Instead it does a two-step:
+// Two-email onboarding model (2026-05-18). THIS function sends Email 1 only:
 //
-//   1. admin.auth.admin.createUser({ email, email_confirm: false,
-//                                    user_metadata: { display_name } })
-//      Creates the auth.users row without sending any email. The
-//      link_player_on_auth_signup trigger (migration 020) fires AFTER INSERT
-//      on auth.users and links the matching pending players row.
+//   Email 1 (admin-triggered welcome) — this function.
+//     admin.auth.admin.inviteUserByEmail(email) creates the auth.users row
+//     AND sends the [auth.email.template.invite] "Invite user" email. That
+//     template body is URL-free welcome text (no {{ .ConfirmationURL }}, no
+//     clickable link) — Supabase still mints a confirmation token server-
+//     side, but with no URL in the body, email-security scanners and iOS
+//     Mail prefetchers have nothing to passively consume (residual,
+//     recoverable phantom-confirmation risk accepted by Buzz). The invited
+//     user is created UNCONFIRMED (email_confirmed_at NULL, invited_at set);
+//     no code or token is surfaced to the recipient.
 //
-//   2. admin.auth.signInWithOtp({ email, options: { shouldCreateUser: false,
-//                                                   emailRedirectTo: undefined } })
-//      Sends a code-only OTP email via the [auth.email.template.magic_link]
-//      template — identical to the email a returning user gets when signing
-//      in. No clickable URL, so email-security scanners and iOS Mail
-//      prefetchers cannot consume the token. The user must type the code
-//      into the app to authenticate, which sets email_confirmed_at and
-//      last_sign_in_at exactly when the human actually signs in.
+//   Email 2 (player-triggered code) — NOT this function.
+//     The player visits windexgolf.com and clicks "Send Login Code", which
+//     calls signInWithOtp → the code-only [auth.email.template.magic_link]
+//     template → 6-digit code (standard 1-hour expiry, fine because they
+//     just requested it). verifyOtp confirms the account on first sign-in,
+//     setting email_confirmed_at / last_sign_in_at.
+//
+// This replaces the 2026-05-14 createUser + signInWithOtp two-step, which
+// emailed the 6-digit code at INVITE time — so the 1-hour OTP expiry began
+// ticking before the player ever looked, and they routinely hit an expired
+// code. Decoupling welcome (Email 1) from code (Email 2, self-served on
+// demand) removes that expiry pressure.
+//
+// inviteUserByEmail creates the auth.users row itself, so createUser is NOT
+// called: GoTrue rejects inviteUserByEmail for an already-existing user
+// (HTTP 422 — see Project_Context 2026-05-14 note), and the existing-auth-
+// by-email precheck below already handles the "row exists" case. The
+// migration-020 link_player_on_auth_signup trigger fires AFTER INSERT on
+// auth.users regardless of which admin API performed the INSERT, so the
+// pending players row is auto-linked by email exactly as before.
 //
 // Auth: handler-side getUser(token) + am_i_super_admin() RPC. Deployed with
 // verify_jwt = false (matches every other function in this project — see
@@ -35,14 +51,14 @@
 //   3. Reject if player.user_id IS NOT NULL → 409 "already linked".
 //   4. Reject if email is null/empty/invalid → 400.
 //   5. Check for an existing auth.users row by email.
-//      a. If found → manually link the player row, no email sent. Response
-//         marks already_had_auth=true.
-//      b. If not found → createUser (trigger auto-links the player) then
-//         signInWithOtp (sends the OTP code email).
-//   6. Re-read players.user_id to confirm the trigger fired and return the
-//      final row. invite_sent=false / linked=true with a warning is the
-//      degenerate state if createUser succeeded but the OTP send failed —
-//      admin can recover by clicking Send Again.
+//      a. If found → manually link the player row, no email sent (avoids a
+//         pointless re-email AND the inviteUserByEmail 422-on-existing-user
+//         error). Response marks already_had_auth=true.
+//      b. If not found → inviteUserByEmail: one atomic call that creates the
+//         auth row, fires the link trigger, and sends the welcome email.
+//   6. Re-read players.user_id to confirm the trigger linked, and return the
+//      final row. linked=false + warning surfaces a rare email-casing /
+//      trigger mismatch rather than silently succeeding.
 //
 // Responses:
 //   200 { ok: true, invite_sent, already_had_auth, linked, player, warning? }
@@ -161,7 +177,7 @@ serve(async (req) => {
     return json({ error: `Player email '${playerRow.email}' is invalid` }, 400);
   }
 
-  // ── Find existing auth user, or createUser + OTP send ────────────────────
+  // ── Find existing auth user, else inviteUserByEmail ──────────────────────
   let existingAuthId: string | null = null;
   try {
     existingAuthId = await findExistingAuthUser(admin, email);
@@ -193,39 +209,28 @@ serve(async (req) => {
       }, 500);
     }
   } else {
-    // Step 1: create the auth.users row without sending an email. The
-    // link_player_on_auth_signup trigger fires AFTER INSERT and links the
-    // matching pending players row by email.
-    const { error: createErr } = await admin.auth.admin.createUser({
-      email,
-      email_confirm: false,
-      user_metadata: { display_name: playerRow.display_name },
+    // Single atomic call: inviteUserByEmail creates the auth.users row
+    // (firing the migration-020 link_player_on_auth_signup trigger, which
+    // links the pending players row by email match) AND sends the URL-free
+    // "Invite user" welcome email. No createUser — GoTrue rejects
+    // inviteUserByEmail for an already-existing user (422), and the
+    // existingAuthId branch above already handled the "row exists" case.
+    // display_name is passed as user metadata for parity with the old
+    // createUser; redirectTo is intentionally omitted so nothing can
+    // re-introduce a confirmation URL into the email body.
+    const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
+      data: { display_name: playerRow.display_name },
     });
-    if (createErr) {
+    if (inviteErr) {
+      // Atomic failure: GoTrue did not create the row (or it pre-existed and
+      // slipped past the precheck via a race). No partial state to clean up
+      // — nothing was emailed; surface the error.
       return json({
-        error: "createUser failed",
-        details: createErr.message,
+        error: "inviteUserByEmail failed",
+        details: inviteErr.message,
       }, 500);
     }
-
-    // Step 2: trigger the OTP code email. Uses the same template the
-    // returning-user sign-in flow uses ([auth.email.template.magic_link],
-    // overridden to a code-only body). shouldCreateUser:false because we
-    // just created the user above; emailRedirectTo:undefined so no
-    // ConfirmationURL is embedded in the email body.
-    const { error: otpErr } = await admin.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false, emailRedirectTo: undefined },
-    });
-    if (otpErr) {
-      // The auth.users row exists and the trigger has linked the player —
-      // only the email send failed (rate limit, SMTP outage, etc.). Don't
-      // delete the auth user; the admin can use Send Again to retry the
-      // email. Surface as 200 with invite_sent=false + warning.
-      warning = `Auth user created but OTP email failed: ${otpErr.message}. Use Send Again to retry.`;
-    } else {
-      invite_sent = true;
-    }
+    invite_sent = true;
   }
 
   // ── Confirm link landed ──────────────────────────────────────────────────
@@ -241,6 +246,17 @@ serve(async (req) => {
     return json({ error: "Post-invite re-read failed", details: postErr.message }, 500);
   }
   const linked = !!(post && (post as PlayerRow).user_id);
+
+  if (invite_sent && !linked) {
+    // Auth row was created + welcome email sent, but the AFTER INSERT
+    // trigger did not link a players row — almost always an email
+    // casing/whitespace mismatch between players.email and the invited
+    // address. Surface it rather than report a clean success.
+    warning =
+      "Invite email sent, but the player row did not auto-link " +
+      "(email casing/whitespace mismatch?). Verify the player's email " +
+      "matches the invited address — the auth user exists either way.";
+  }
 
   return json({
     ok: true,

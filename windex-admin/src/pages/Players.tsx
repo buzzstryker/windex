@@ -10,7 +10,6 @@ import { isCurrentUserSuperAdmin, listGroups } from '../api/groups';
 import {
   listPlayersWithMembership, updatePlayer, updateMembership,
   sendInvite, PlayerAlreadyLinkedError,
-  sendInviteAgain, PlayerAlreadySignedInError, PlayerNotYetInvitedError,
   getPlayersAuthStatus,
   type PlayerWithMembership, type PlayerAuthStatus,
 } from '../api/playerAdmin';
@@ -30,8 +29,6 @@ function getCurrentUserId(): string | null {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hasValidEmail = (email: string | null) =>
   !!email && EMAIL_RE.test(email.trim());
-
-type InviteMode = 'first' | 'again';
 
 // ─── Status column ────────────────────────────────────────────────────────
 // Three-state derivation from players.user_id + the get_players_auth_status
@@ -93,14 +90,13 @@ export function Players() {
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   // Per-player auth status from get_players_auth_status RPC (migration 027).
-  // Empty until the RPC resolves; rows render the conservative "no Send Again"
-  // affordance until then so we never surface the button against a player who
-  // may have already signed in.
+  // Drives the Status pill (invited vs signed in); empty until the RPC
+  // resolves, in which case the pill renders "—" until truth arrives.
   const [authStatus, setAuthStatus] = useState<Map<string, PlayerAuthStatus>>(new Map());
-  // Invite flow state — shared between first-send and send-again. inviteMode
-  // selects ConfirmModal copy + which backend the handler dispatches to.
+  // First-invite flow state (send-invite Edge Function). Players who were
+  // invited but haven't signed in self-serve at windexgolf.com/login — there
+  // is no admin re-send.
   const [inviteTarget, setInviteTarget] = useState<PlayerWithMembership | null>(null);
-  const [inviteMode, setInviteMode] = useState<InviteMode>('first');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   // Retire / unretire flow (migration 029). Single-axis: only retired_at is
@@ -181,33 +177,24 @@ export function Players() {
     setInviting(true);
     setInviteError(null);
     try {
-      if (inviteMode === 'first') {
-        const res = await sendInvite(inviteTarget.id);
-        let line: string;
-        if (res.already_had_auth) {
-          line = `Auth account already existed for ${inviteTarget.email}; linked without re-emailing.`;
-        } else if (res.invite_sent && res.linked) {
-          line = `Invite sent to ${inviteTarget.email}.`;
-        } else if (res.invite_sent && !res.linked) {
-          line = `Invite sent to ${inviteTarget.email}, but auto-link didn't fire. Refresh and check the player's email.`;
-        } else {
-          line = `Invite request returned without change. Refresh and verify.`;
-        }
-        setToast(line);
+      const res = await sendInvite(inviteTarget.id);
+      let line: string;
+      if (res.already_had_auth) {
+        line = `Auth account already existed for ${inviteTarget.email}; linked without re-emailing.`;
+      } else if (res.invite_sent && res.linked) {
+        line = `Invite sent to ${inviteTarget.email}.`;
+      } else if (res.invite_sent && !res.linked) {
+        line = `Invite sent to ${inviteTarget.email}, but auto-link didn't fire. Refresh and check the player's email.`;
       } else {
-        await sendInviteAgain(inviteTarget.id);
-        setToast(`Invite sent again to ${inviteTarget.email}.`);
+        line = `Invite request returned without change. Refresh and verify.`;
       }
+      setToast(line);
       setInviteTarget(null);
       load();
-      loadAuthStatus(); // refresh per-row state so button transitions reflect server truth
+      loadAuthStatus(); // refresh per-row state so the Status pill reflects server truth
     } catch (e) {
       if (e instanceof PlayerAlreadyLinkedError) {
         setInviteError('This player is already linked to an auth user. Refresh the page.');
-      } else if (e instanceof PlayerAlreadySignedInError) {
-        setInviteError('This player has already signed in — no re-invite needed. Refresh the page.');
-      } else if (e instanceof PlayerNotYetInvitedError) {
-        setInviteError('This player has never been invited. Refresh and use Send Invite instead.');
       } else {
         setInviteError(e instanceof Error ? e.message : 'Failed to send invite');
       }
@@ -238,9 +225,8 @@ export function Players() {
     }
   };
 
-  // ConfirmModal copy varies by mode; build it inline.
-  const modalTitle = inviteMode === 'again' ? 'Send invite again' : 'Send invite';
-  const modalConfirmLabel = inviteMode === 'again' ? 'Send again' : 'Send invite';
+  const modalTitle = 'Send invite';
+  const modalConfirmLabel = 'Send invite';
 
   return (
     <>
@@ -315,7 +301,7 @@ export function Players() {
         onCancel={() => { setInviteTarget(null); setInviteError(null); }}
         onConfirm={handleConfirmInvite}
       >
-        {inviteTarget && inviteMode === 'first' && (
+        {inviteTarget && (
           <div style={{ fontSize: 14, lineHeight: 1.5 }}>
             <p style={{ margin: 0 }}>
               Send an OTP invite to <strong>{inviteTarget.display_name}</strong> at{' '}
@@ -325,17 +311,6 @@ export function Players() {
               The player will receive a sign-in email. If they already have an auth
               account under that email, we'll link the player record without sending
               a new email.
-            </p>
-          </div>
-        )}
-        {inviteTarget && inviteMode === 'again' && (
-          <div style={{ fontSize: 14, lineHeight: 1.5 }}>
-            <p style={{ margin: 0 }}>
-              Send invite again to <strong>{inviteTarget.display_name}</strong> at{' '}
-              <code>{inviteTarget.email}</code>?
-            </p>
-            <p style={{ margin: '12px 0 0', color: '#666', fontSize: 13 }}>
-              This will invalidate any previous invite link and send a fresh one.
             </p>
           </div>
         )}
@@ -416,8 +391,7 @@ export function Players() {
                       tab={tab}
                       authStatus={authStatus.get(p.id) ?? null}
                       onEdit={() => { setEditingId(p.id); setSaveMsg(null); }}
-                      onSendInvite={() => { setInviteMode('first'); setInviteError(null); setInviteTarget(p); }}
-                      onSendInviteAgain={() => { setInviteMode('again'); setInviteError(null); setInviteTarget(p); }}
+                      onSendInvite={() => { setInviteError(null); setInviteTarget(p); }}
                       onRetire={() => { setRetireMode('retire'); setRetireError(null); setRetireTarget(p); }}
                       onUnretire={() => { setRetireMode('unretire'); setRetireError(null); setRetireTarget(p); }}
                     />
@@ -437,7 +411,6 @@ function DisplayRow({
   authStatus,
   onEdit,
   onSendInvite,
-  onSendInviteAgain,
   onRetire,
   onUnretire,
 }: {
@@ -447,7 +420,6 @@ function DisplayRow({
   authStatus: PlayerAuthStatus | null;
   onEdit: () => void;
   onSendInvite: () => void;
-  onSendInviteAgain: () => void;
   onRetire: () => void;
   onUnretire: () => void;
 }) {
@@ -457,21 +429,10 @@ function DisplayRow({
     ? (p.email ? 'Email is invalid' : 'Add an email first')
     : null;
 
-  // Three-state derivation for the action affordance:
-  //   showSendInvite     — never invited (no user_id). Existing first-send flow.
-  //   showSendAgain      — invited, but not yet confirmed/signed in.
-  //                        Requires auth status to confirm (conservative until
-  //                        the RPC resolves so we don't surface "Send Again"
-  //                        against someone who actually signed in already).
-  //   showBadgeOnly      — fully active. No button.
-  // Invite affordances are operational-only — never offered on the Retired tab.
+  // Invite affordance: only for never-invited players (no user_id) on the
+  // active tab. Invited-but-not-signed-in players self-serve sign-in at
+  // windexgolf.com/login — admins no longer re-send. Never on the Retired tab.
   const showSendInvite = isSuperAdmin && !linked && tab === 'active';
-  const showSendAgain =
-    isSuperAdmin
-    && linked
-    && authStatus !== null
-    && !authStatus.has_signed_in
-    && tab === 'active';
 
   const status = deriveStatus(p, authStatus);
 
@@ -498,15 +459,6 @@ function DisplayRow({
             style={{ padding: '4px 10px', fontSize: 12, marginRight: 4, opacity: emailOk ? 1 : 0.55 }}
           >
             Send Invite
-          </button>
-        )}
-        {showSendAgain && (
-          <button
-            className="btn btn-primary"
-            onClick={onSendInviteAgain}
-            style={{ padding: '4px 10px', fontSize: 12, marginRight: 4 }}
-          >
-            Send Again
           </button>
         )}
         {isSuperAdmin && tab === 'active' && (
