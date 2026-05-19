@@ -92,3 +92,5 @@
   - `CHECK` constraint on `league_rounds` populated by a `score_count` denormalized field maintained by trigger
 
   Low priority — current attack surface is internal only, and Frank's case was a UI bug not malicious input.
+
+- **Cup Championship finish-ranking UI.** There is no UI today to record the actual finish ranking in Windex Cup championships. Verified 2026-05-19 while building the playoff-insights data export: the only Cup data stored is `seasons.cup_champion_player_id` (winner only) + the free-text `cup_champion_notes` — no runners-up, no finish order. Recording full finish order (1st, 2nd, 3rd, … last) per championship would unlock much richer commentary for the playoff-insights tool (e.g. "Buzz has finished top-3 in 4 of his last 5 Cup appearances", "cup_appearances" counts). Out of scope for the initial insights tool — that export omits `runners_up` / `cup_appearances` entirely because the data doesn't exist. Tracked for follow-up: would need a new table (e.g. `season_cup_results(season_id, player_id, finish_rank)`) or a JSON column on `seasons`, plus an admin entry UI on the existing Cup Champions tab.
