@@ -4,6 +4,7 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmToast } from '../components/ConfirmToast';
+import { EditChampionshipResultsModal } from '../components/EditChampionshipResultsModal';
 import { isCurrentUserSuperAdmin, listGroups, listSeasons } from '../api/groups';
 import {
   listCupChampionCandidates,
@@ -12,6 +13,10 @@ import {
   type CupChampionCandidate,
   type PlayerNames,
 } from '../api/cupChampions';
+import {
+  listChampionshipResultsForSeasons,
+  type ChampionshipResult,
+} from '../api/championshipResults';
 import type { Group, Season } from '../types';
 import { seasonLabel } from '../types';
 
@@ -35,12 +40,19 @@ export function CupChampions() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [seasons, setSeasons] = useState<Season[]>([]);
-  const [championNames, setChampionNames] = useState<Map<string, PlayerNames>>(new Map());
+  // Name resolution for every player id rendered in the top-3 column,
+  // including the season's cup_champion_player_id fallback and any
+  // ex-member ids from championship_results.
+  const [playerNames, setPlayerNames] = useState<Map<string, PlayerNames>>(new Map());
+  // championship_results grouped by season_id, places 1-3 only (rendered inline).
+  // Stored as a per-season ordered array so ties at a given place stay together.
+  const [topThreeBySeason, setTopThreeBySeason] = useState<Map<string, ChampionshipResult[]>>(new Map());
   const [candidates, setCandidates] = useState<CupChampionCandidate[]>([]);
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editingSeason, setEditingSeason] = useState<Season | null>(null);
+  const [editingResultsSeason, setEditingResultsSeason] = useState<Season | null>(null);
+  const [editingNotesSeason, setEditingNotesSeason] = useState<Season | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -69,18 +81,44 @@ export function CupChampions() {
     const list = await listSeasons(groupId);
     const sorted = [...list].sort((a, b) => b.start_date.localeCompare(a.start_date));
     setSeasons(sorted);
+
+    // Pull championship_results across all seasons in one shot; keep only
+    // top-3 placements for the inline list view.
+    const seasonIds = sorted.map((s) => s.id);
+    let topThree = new Map<string, ChampionshipResult[]>();
+    let allResultIds: string[] = [];
+    if (seasonIds.length > 0) {
+      try {
+        const allRows = await listChampionshipResultsForSeasons(seasonIds);
+        const filtered = allRows.filter((r) => r.place <= 3);
+        for (const r of filtered) {
+          const arr = topThree.get(r.season_id) ?? [];
+          arr.push(r);
+          topThree.set(r.season_id, arr);
+        }
+        allResultIds = filtered.map((r) => r.player_id);
+      } catch {
+        // Soft-fail: list view still renders the per-season champion fallback.
+        topThree = new Map();
+      }
+    }
+    setTopThreeBySeason(topThree);
+
+    // Resolve names for: every top-3 player_id + every legacy
+    // cup_champion_player_id (covers seasons with no results rows yet).
     const championIds = sorted
       .map((s) => s.cup_champion_player_id)
       .filter((id): id is string => !!id);
-    if (championIds.length > 0) {
+    const idSet = new Set<string>([...championIds, ...allResultIds]);
+    if (idSet.size > 0) {
       try {
-        const names = await getPlayerNames(championIds);
-        setChampionNames(names);
+        const names = await getPlayerNames(Array.from(idSet));
+        setPlayerNames(names);
       } catch {
-        setChampionNames(new Map());
+        setPlayerNames(new Map());
       }
     } else {
-      setChampionNames(new Map());
+      setPlayerNames(new Map());
     }
   }, []);
 
@@ -118,11 +156,17 @@ export function CupChampions() {
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
 
+  const resolveName = (playerId: string | null | undefined): string | null => {
+    if (!playerId) return null;
+    const rec = playerNames.get(playerId);
+    return rec?.full_name ?? rec?.display_name ?? playerId.slice(0, 8);
+  };
+
   return (
     <>
       <PageHeader
         title="Cup Champions"
-        subtitle="Manually-recorded per-season champion (distinct from the auto-computed points-standings winner)."
+        subtitle="Full per-season finishing order (canonical). Notes stay on the season row."
       />
 
       <div className="card">
@@ -150,20 +194,16 @@ export function CupChampions() {
               <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
                 <th style={th}>Season</th>
                 <th style={th}>Status</th>
-                <th style={th}>Champion</th>
+                <th style={th}>Top 3</th>
                 <th style={th}></th>
               </tr>
             </thead>
             <tbody>
               {seasons.map((s) => {
                 const status = seasonStatus(s, today);
-                const championId = s.cup_champion_player_id ?? null;
-                const championRecord = championId ? championNames.get(championId) : null;
-                // Table renders full_name; fall back to display_name then id slice
-                // if full_name is null (shouldn't happen — all current players
-                // have full_name populated — but defensive).
-                const championName = championId
-                  ? championRecord?.full_name ?? championRecord?.display_name ?? championId.slice(0, 8)
+                const topThree = topThreeBySeason.get(s.id) ?? [];
+                const championFallback = topThree.length === 0
+                  ? resolveName(s.cup_champion_player_id ?? null)
                   : null;
                 const rowStyle: React.CSSProperties = {
                   borderBottom: '1px solid #eee',
@@ -182,19 +222,30 @@ export function CupChampions() {
                       <StatusBadge status={status} />
                     </td>
                     <td style={td}>
-                      {championName ? (
-                        <span>{championName}</span>
+                      {topThree.length > 0 ? (
+                        <TopThreeList rows={topThree} resolveName={resolveName} />
+                      ) : championFallback ? (
+                        <span style={{ fontSize: 13 }}>
+                          <strong>1.</strong> {championFallback}
+                        </span>
                       ) : (
-                        <span style={{ fontStyle: 'italic', color: '#999' }}>(not set)</span>
+                        <span style={{ fontStyle: 'italic', color: '#999' }}>(no results)</span>
                       )}
                     </td>
-                    <td style={{ ...td, textAlign: 'right' }}>
+                    <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: 13, marginRight: 6 }}
+                        onClick={() => setEditingResultsSeason(s)}
+                      >
+                        Edit Results
+                      </button>
                       <button
                         className="btn btn-secondary"
                         style={{ padding: '4px 10px', fontSize: 13 }}
-                        onClick={() => setEditingSeason(s)}
+                        onClick={() => setEditingNotesSeason(s)}
                       >
-                        {championId ? 'Edit' : 'Set Champion'}
+                        Notes
                       </button>
                     </td>
                   </tr>
@@ -205,41 +256,38 @@ export function CupChampions() {
         )}
       </div>
 
-      {editingSeason && (
-        <SetChampionModal
-          season={editingSeason}
+      {editingResultsSeason && (
+        <EditChampionshipResultsModal
+          season={editingResultsSeason}
           candidates={candidates}
-          currentChampionDisplayName={
-            editingSeason.cup_champion_player_id
-              ? championNames.get(editingSeason.cup_champion_player_id)?.display_name ?? null
-              : null
-          }
-          onClose={() => setEditingSeason(null)}
-          onSaved={async (newPlayerId, newNotes) => {
-            const savedSeason = editingSeason;
-            setEditingSeason(null);
-            const label = seasonLabel(savedSeason);
-            if (newPlayerId === null) {
-              setToast(`Champion cleared for ${label}`);
-            } else {
-              const name = candidates.find((c) => c.player_id === newPlayerId)?.display_name ?? 'champion';
-              setToast(`${name} saved as champion for ${label}`);
+          isCurrentSeason={seasonStatus(editingResultsSeason, today) === 'current'}
+          onClose={() => setEditingResultsSeason(null)}
+          onSaved={async () => {
+            const saved = editingResultsSeason;
+            setEditingResultsSeason(null);
+            setToast(`Results saved for ${seasonLabel(saved)}`);
+            try {
+              await reloadSeasons(saved.group_id);
+            } catch {
+              // Optimistic state already cleared; soft-fail is acceptable.
             }
-            // Reflect the change locally without an immediate refetch so the
-            // toast and the table stay in sync visually, then refetch in the
-            // background to pick up updated_at + any other server-side state.
+          }}
+        />
+      )}
+
+      {editingNotesSeason && (
+        <EditNotesModal
+          season={editingNotesSeason}
+          onClose={() => setEditingNotesSeason(null)}
+          onSaved={async (newNotes) => {
+            const saved = editingNotesSeason;
+            setEditingNotesSeason(null);
+            setToast(`Notes saved for ${seasonLabel(saved)}`);
             setSeasons((prev) =>
-              prev.map((s) =>
-                s.id === savedSeason.id
-                  ? { ...s, cup_champion_player_id: newPlayerId, cup_champion_notes: newNotes }
-                  : s
+              prev.map((row) =>
+                row.id === saved.id ? { ...row, cup_champion_notes: newNotes } : row
               )
             );
-            try {
-              await reloadSeasons(savedSeason.group_id);
-            } catch {
-              // Soft-fail — the optimistic local update is already in place.
-            }
           }}
         />
       )}
@@ -274,23 +322,53 @@ function StatusBadge({ status }: { status: SeasonStatus }) {
   );
 }
 
-interface SetChampionModalProps {
-  season: Season;
-  candidates: CupChampionCandidate[];
-  /** display_name of the current champion (picker uses nicknames, not full names). */
-  currentChampionDisplayName: string | null;
-  onClose: () => void;
-  onSaved: (playerId: string | null, notes: string | null) => void | Promise<void>;
+/**
+ * Renders the top-3 column. Rows are already ordered by (place, created_at).
+ * Ties at a given place are listed on the same line.
+ */
+function TopThreeList({
+  rows,
+  resolveName,
+}: {
+  rows: ChampionshipResult[];
+  resolveName: (id: string | null | undefined) => string | null;
+}) {
+  // Group by place to render ties on a single line.
+  const byPlace = new Map<number, string[]>();
+  for (const r of rows) {
+    const name = resolveName(r.player_id) ?? r.player_id.slice(0, 8);
+    const arr = byPlace.get(r.place) ?? [];
+    arr.push(name);
+    byPlace.set(r.place, arr);
+  }
+  const places = Array.from(byPlace.keys()).sort((a, b) => a - b);
+  return (
+    <div style={{ fontSize: 13, lineHeight: '18px' }}>
+      {places.map((p) => (
+        <div key={p}>
+          <strong>{p}.</strong> {byPlace.get(p)!.join(', ')}
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function SetChampionModal({
+/**
+ * Notes-only editor. Per the locked spec, seasons.cup_champion_notes stays
+ * editable directly on the season row, orthogonal to championship_results.
+ * The original SetChampionModal's player picker was removed because
+ * championship_results is now canonical for the winner — the sync trigger
+ * would silently overwrite any picker-set value.
+ */
+function EditNotesModal({
   season,
-  candidates,
-  currentChampionDisplayName,
   onClose,
   onSaved,
-}: SetChampionModalProps) {
-  const [playerId, setPlayerId] = useState<string>(season.cup_champion_player_id ?? '');
+}: {
+  season: Season;
+  onClose: () => void;
+  onSaved: (notes: string | null) => void | Promise<void>;
+}) {
   const [notes, setNotes] = useState<string>(season.cup_champion_notes ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -303,21 +381,16 @@ function SetChampionModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onClose]);
 
-  // If the current champion is no longer in the candidates list (e.g.
-  // ex-member), surface their name so the admin can see the existing value
-  // even though selecting it again wouldn't be possible from the dropdown.
-  const currentNotInCandidates =
-    season.cup_champion_player_id &&
-    !candidates.some((c) => c.player_id === season.cup_champion_player_id);
-
   const handleSave = async () => {
     setBusy(true);
     setErr(null);
     try {
-      const newPlayerId = playerId === '' ? null : playerId;
       const newNotes = notes.trim() === '' ? null : notes.trim();
-      await setSeasonChampion(season.id, newPlayerId, newNotes);
-      await onSaved(newPlayerId, newNotes);
+      // setSeasonChampion handles the seasons PATCH; pass current
+      // cup_champion_player_id verbatim so we don't unintentionally clear
+      // it (the sync trigger keeps it in lockstep otherwise).
+      await setSeasonChampion(season.id, season.cup_champion_player_id ?? null, newNotes);
+      await onSaved(newNotes);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to save');
       setBusy(false);
@@ -328,7 +401,7 @@ function SetChampionModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="champ-modal-title"
+      aria-labelledby="notes-modal-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -345,56 +418,31 @@ function SetChampionModal({
     >
       <div style={{ background: '#fff', borderRadius: 8, maxWidth: 480, width: '100%', boxShadow: '0 10px 30px rgba(0,0,0,0.25)', overflow: 'hidden' }}>
         <div style={{ padding: '14px 20px', background: '#f5f5f5', borderBottom: '1px solid #e0e0e0' }}>
-          <h2 id="champ-modal-title" style={{ margin: 0, fontSize: '1.1rem' }}>
-            {season.cup_champion_player_id ? 'Edit Cup Champion' : 'Set Cup Champion'} — {seasonLabel(season)}
+          <h2 id="notes-modal-title" style={{ margin: 0, fontSize: '1.1rem' }}>
+            Cup Champion Notes — {seasonLabel(season)}
           </h2>
           <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{formatRange(season)}</div>
         </div>
 
         <div style={{ padding: 20 }}>
-          <div style={{ marginBottom: 14 }}>
-            <label htmlFor="champ-player" style={labelStyle}>Champion</label>
-            <select
-              id="champ-player"
-              value={playerId}
-              onChange={(e) => setPlayerId(e.target.value)}
-              style={inputStyle}
-              disabled={busy}
-            >
-              <option value="">(none — clear champion)</option>
-              {currentNotInCandidates && season.cup_champion_player_id && (
-                <option value={season.cup_champion_player_id}>
-                  {currentChampionDisplayName ?? season.cup_champion_player_id.slice(0, 8)} (no longer a member)
-                </option>
-              )}
-              {candidates.map((c) => (
-                <option key={c.player_id} value={c.player_id}>
-                  {c.display_name}{c.is_active === 0 ? ' (inactive)' : ''}
-                </option>
-              ))}
-            </select>
-            <div style={hintStyle}>
-              Dropdown shows current and former members of this group.
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 4 }}>
-            <label htmlFor="champ-notes" style={labelStyle}>Notes (optional)</label>
-            <textarea
-              id="champ-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
-              disabled={busy}
-              placeholder="e.g. 18-hole match play playoff, final tournament shootout"
-            />
+          <label htmlFor="champ-notes" style={labelStyle}>
+            Notes (optional)
+          </label>
+          <textarea
+            id="champ-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={4}
+            style={{ ...inputStyle, fontFamily: 'inherit', resize: 'vertical' }}
+            disabled={busy}
+            placeholder="e.g. 18-hole match play playoff, final tournament shootout"
+          />
+          <div style={hintStyle}>
+            Winner is set in "Edit Results"; this field is just the prose explanation.
           </div>
 
           {err && (
-            <div role="alert" style={errorStyle}>
-              {err}
-            </div>
+            <div role="alert" style={errorStyle}>{err}</div>
           )}
         </div>
 
@@ -415,7 +463,7 @@ function SetChampionModal({
 }
 
 const th: React.CSSProperties = { padding: '8px 10px' };
-const td: React.CSSProperties = { padding: '10px 10px', verticalAlign: 'middle' };
+const td: React.CSSProperties = { padding: '10px 10px', verticalAlign: 'top' };
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
