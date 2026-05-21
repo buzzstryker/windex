@@ -1,7 +1,7 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "ignoreCommand": "git fetch origin \"${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}\" --depth=1 --quiet 2>/dev/null || true; git diff --quiet \"${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}\" HEAD -- .",
+  "ignoreCommand": "git fetch --unshallow --quiet 2>/dev/null || true; git diff --quiet \"${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}\" HEAD -- .",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
