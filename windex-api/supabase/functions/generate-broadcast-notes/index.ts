@@ -423,6 +423,11 @@ serve(async (req) => {
   // fact_check_audit semantics (migration 033):
   //   null   → fact-check never ran (aborted at stage 1). Column stays NULL.
   //   object → fact-check ran; carries an `error` field on hard-fail paths.
+  // input_data semantics (migration 034): the round/season `payload` sent to
+  // Claude stage 1 (identical to what stage 2 received). writeAudit is only
+  // ever called from stage 2 onward — after the payload was used — so every
+  // row it writes carries the payload. Stage-1 aborts write no row, leaving
+  // input_data NULL.
   // `notes` holds the stage-1 prose until stage 3 overwrites it with the
   // revised prose on success, so output_length always matches what we return.
   let notes = "";
@@ -432,6 +437,18 @@ serve(async (req) => {
       const hashInput = `${groupId}\n${[...playerIds].sort().join(",")}`;
       const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(hashInput));
       const inputHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+      // Defensive serialization: payload is plain data (strings/numbers/arrays)
+      // and always serializes, but round-tripping guarantees the jsonb value is
+      // valid and isolates any future non-serializable value (circular ref,
+      // BigInt) to a placeholder rather than failing the whole audit insert.
+      let inputData: unknown;
+      try {
+        inputData = JSON.parse(JSON.stringify(payload));
+      } catch (e) {
+        const reason = e instanceof Error ? e.message : String(e);
+        console.error("input_data not serializable, writing placeholder:", reason);
+        inputData = { error: `payload not serializable: ${reason}` };
+      }
       const admin = createClient(supabaseUrl, serviceRoleKey, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
@@ -444,6 +461,7 @@ serve(async (req) => {
         output_length: notes.length,
         generation_ms: generationMs,
         model: MODEL,
+        input_data: inputData,
       };
       if (factCheckAudit !== null) row.fact_check_audit = factCheckAudit;
       const { error: logErr } = await admin.from("broadcast_notes_log").insert(row);
