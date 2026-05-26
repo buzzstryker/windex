@@ -409,10 +409,25 @@ export async function generatePaymentRequests(leagueRoundId: string) {
 
 /* --- Broadcast Notes --- */
 
+export type BroadcastNotesFactCheckAnnotation = {
+  id: string;
+  status: 'verified' | 'wrong' | 'ambiguous' | 'unverifiable';
+  correction?: string;
+  reasoning: string;
+};
+
 export type BroadcastNotesResponse = {
   notes: string;
   generated_at: string;
   spotlight_names: string[];
+  // Added by the Perplexity fact-check pass. Optional so existing callers that
+  // ignore it keep working; present on every successful generation.
+  fact_check?: {
+    annotations: BroadcastNotesFactCheckAnnotation[];
+    status: 'ok';
+    perplexity_model: string;
+    claude_model: string;
+  };
 };
 
 /**
