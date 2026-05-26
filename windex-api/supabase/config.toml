@@ -145,3 +145,5 @@ verify_jwt = false
 verify_jwt = false
 [functions.generate-broadcast-notes]
 verify_jwt = false
+[functions.list-broadcast-notes-audits]
+verify_jwt = false

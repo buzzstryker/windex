@@ -1,10 +1,22 @@
+import { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { getAuthToken, setAuthToken } from '../api/client';
+import { isCurrentUserSuperAdmin } from '../api/groups';
 
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const hasToken = !!getAuthToken();
+
+  // Super-admin-only nav items (e.g. Broadcast Notes Audit) follow the same
+  // conditional-render pattern used for super-admin affordances elsewhere.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!hasToken) { setIsSuperAdmin(false); return; }
+    isCurrentUserSuperAdmin().then((v) => { if (!cancelled) setIsSuperAdmin(v); });
+    return () => { cancelled = true; };
+  }, [hasToken]);
 
   const nav = [
     { path: '/dashboard', label: 'Dashboard' },
@@ -18,6 +30,7 @@ export function Layout() {
     { path: '/analytics/points', label: 'Points Analysis' },
     { path: '/review/attribution', label: 'Attribution review' },
     { path: '/review/player-mapping', label: 'Player Mapping' },
+    ...(isSuperAdmin ? [{ path: '/broadcast-notes-audit', label: 'Broadcast Notes Audit' }] : []),
   ];
 
   const handleSignOut = () => {

@@ -16,6 +16,8 @@ import { PointsAnalysis } from './pages/PointsAnalysis';
 import { Players } from './pages/Players';
 import { Activity } from './pages/Activity';
 import { PlayerActivityDetail } from './pages/PlayerActivityDetail';
+import { BroadcastNotesAudit } from './pages/BroadcastNotesAudit';
+import { BroadcastNotesAuditDetail } from './pages/BroadcastNotesAuditDetail';
 
 export default function App() {
   return (
@@ -40,6 +42,8 @@ export default function App() {
         <Route path="players" element={<Players />} />
         <Route path="activity" element={<Activity />} />
         <Route path="activity/:playerId" element={<PlayerActivityDetail />} />
+        <Route path="broadcast-notes-audit" element={<BroadcastNotesAudit />} />
+        <Route path="broadcast-notes-audit/:id" element={<BroadcastNotesAuditDetail />} />
       </Route>
     </Routes>
   );
