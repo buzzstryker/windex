@@ -50,13 +50,10 @@ const PERPLEXITY_MODEL = "sonar-pro";
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const FACT_CHECK_TIMEOUT_MS = 30_000;
 
-// Per Buzz: full Cup finishing order was only entered starting with the 2025
-// season. Earlier seasons hold at most a winner (backfill) or a partial top-N,
-// so a season can only be classified "complete" from this year on — even if an
-// older season's recorded places happen to be gap-free (a top-3 of a larger
-// field looks gap-free). NOTE: this is a single hardcoded cutoff; if other
-// groups reached full-results parity in a different year, make it per-group.
-const CUP_FULL_RESULTS_FROM_YEAR = 2025;
+// 2025 is when full finishing-order recording began for Windex.
+// Other groups may have different cutoff years or may not record
+// full order at all. See BACKLOG: per-group cup completeness cutoffs.
+const WINDEX_CUP_FULL_RESULTS_FROM_YEAR = 2025;
 
 // Claude and Perplexity occasionally wrap JSON in ```json fences despite being
 // told not to. Strip a single surrounding fence before JSON.parse.
@@ -311,7 +308,7 @@ serve(async (req) => {
       }
       // Only seasons from the full-results era can be "complete" (see constant):
       // an older gap-free set may still be a partial top-N of a larger field.
-      completeness = gapless && year >= CUP_FULL_RESULTS_FROM_YEAR ? "complete" : "partial";
+      completeness = gapless && year >= WINDEX_CUP_FULL_RESULTS_FROM_YEAR ? "complete" : "partial";
     }
     const winner_id = s.cup_champion_player_id ?? rows.find((r) => r.place === 1)?.player_id ?? null;
     cupSeasonMeta.set(sid, {
@@ -342,7 +339,9 @@ serve(async (req) => {
     .sort((a, b) => a.year - b.year)
     .map((m) => ({
       season: m.label,
-      total_participants: m.total_participants,
+      // Only known when the full field is recorded; otherwise the recorded row
+      // count is NOT the participant count, so report null (unknown).
+      total_participants: m.completeness === "complete" ? m.total_participants : null,
       winner: m.winner_id ? nm(m.winner_id) : null,
       data_completeness: m.completeness,
     }));
@@ -360,17 +359,16 @@ serve(async (req) => {
     }
     appearances.sort((a, b) => a.year - b.year);
     const results_by_season = appearances.map((a) => ({
-      season: a.label, place: a.place, total_participants: a.total, data_completeness: a.completeness,
+      season: a.label, place: a.place,
+      // null unless the full field is known (see championships_played note).
+      total_participants: a.completeness === "complete" ? a.total : null,
+      data_completeness: a.completeness,
     }));
-    const seasons_not_participated = [...cupSeasonMeta.values()]
-      .filter((m) => !appearances.some((a) => a.sid === m.season_id))
-      .sort((a, b) => a.year - b.year)
-      .map((m) => m.label);
     if (appearances.length === 0) {
       return {
         total_appearances: 0, wins: 0, top_3_finishes: 0, last_place_finishes: 0,
         best_finish: null, worst_finish: null, average_finish: null,
-        results_by_season, seasons_not_participated,
+        results_by_season,
       };
     }
     // best = lowest place, worst = highest place; ties broken by most recent season.
@@ -385,7 +383,6 @@ serve(async (req) => {
       worst_finish: { place: byWorst.place, season: byWorst.label },
       average_finish: Math.round((appearances.reduce((s, a) => s + a.place, 0) / appearances.length) * 10) / 10,
       results_by_season,
-      seasons_not_participated,
     };
   };
 
