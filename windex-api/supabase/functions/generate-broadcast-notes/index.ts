@@ -7,9 +7,17 @@
 // Computes a GROUP-SCOPED stats payload for the selected spotlight players
 // (career, current-season, recent form, streaks, signature events,
 // championship history, and head-to-head among the spotlight players only),
-// sends it to the Anthropic API with a fixed broadcaster system prompt, and
-// returns the generated commentary. Every call is logged to
-// broadcast_notes_log (best-effort; logging failure never fails the request).
+// then runs a three-stage pipeline:
+//   1. Claude generates the broadcast notes + a structured `claims` list.
+//   2. Perplexity (sonar-pro) fact-checks each claim against the payload
+//      (round_data claims) or public web knowledge (general_knowledge claims).
+//   3. Claude integrates the corrections it agrees with, preserving its voice.
+// Returns { notes, fact_check: { annotations, status, ... } }. The fact-check
+// is mandatory: any stage failure HARD-FAILS with a clear error (the feature
+// runs ~4×/year during the cup championship, so Buzz must SEE failures, not
+// miss a silent warning). Every call is logged to broadcast_notes_log
+// (best-effort; logging failure never fails the request), and the fact-check
+// audit is stored on that row's fact_check_audit jsonb column (migration 033).
 //
 // GROUP-SCOPING INVARIANT: league_scores has no group_id. Every stat is
 // derived only from league_scores whose league_round_id belongs to a
@@ -33,6 +41,22 @@ function json(body: unknown, status: number) {
 }
 
 const MODEL = "claude-sonnet-4-20250514";
+
+// Fact-check pass (stage 2). sonar-pro is Perplexity's grounded search model
+// (web search + citations) — verified against the current Perplexity model
+// docs. 30s timeout is intentionally generous: this runs ~4×/year during the
+// cup championship, so latency/cost are non-issues.
+const PERPLEXITY_MODEL = "sonar-pro";
+const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
+const FACT_CHECK_TIMEOUT_MS = 30_000;
+
+// Claude and Perplexity occasionally wrap JSON in ```json fences despite being
+// told not to. Strip a single surrounding fence before JSON.parse.
+function stripJsonFence(text: string): string {
+  const t = text.trim();
+  const m = t.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  return m ? m[1].trim() : t;
+}
 
 const SYSTEM_PROMPT =
 `You are a senior sports broadcaster prepping playoff commentary for a recurring private golf points league. Surface specific, quotable, stat-grounded angles a play-by-play announcer and color commentator would use.
@@ -380,25 +404,77 @@ serve(async (req) => {
     spotlight_players: spotlight,
   };
 
-  const userPrompt =
+  // ── Stage 0: config gate (both keys must be present; hard-fail loudly) ────
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!anthropicKey) {
+    return json({ error: "Broadcast Notes is not configured yet (ANTHROPIC_API_KEY missing). Ask an admin to set the Supabase function secret." }, 503);
+  }
+  // Locked: every failure must surface. The fact-check is mandatory, so a
+  // missing Perplexity key fails before we spend a Claude call.
+  const perplexityKey = Deno.env.get("PERPLEXITY_API_KEY");
+  if (!perplexityKey) {
+    console.error("PERPLEXITY_API_KEY missing — fact-check cannot run");
+    return json({ error: "Fact-check is not configured (PERPLEXITY_API_KEY missing). Ask an admin to set the Supabase function secret." }, 503);
+  }
+
+  const generatedAt = new Date().toISOString();
+
+  // ── Best-effort audit-log writer (never fails the request) ────────────────
+  // fact_check_audit semantics (migration 033):
+  //   null   → fact-check never ran (aborted at stage 1). Column stays NULL.
+  //   object → fact-check ran; carries an `error` field on hard-fail paths.
+  // `notes` holds the stage-1 prose until stage 3 overwrites it with the
+  // revised prose on success, so output_length always matches what we return.
+  let notes = "";
+  let generationMs = 0;
+  const writeAudit = async (factCheckAudit: Record<string, unknown> | null) => {
+    try {
+      const hashInput = `${groupId}\n${[...playerIds].sort().join(",")}`;
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(hashInput));
+      const inputHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const admin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const row: Record<string, unknown> = {
+        user_id: userId,
+        group_id: groupId,
+        player_ids: spotlight.map((p) => p.player_id as string),
+        spotlight_names: spotlightNames,
+        input_hash: inputHash,
+        output_length: notes.length,
+        generation_ms: generationMs,
+        model: MODEL,
+      };
+      if (factCheckAudit !== null) row.fact_check_audit = factCheckAudit;
+      const { error: logErr } = await admin.from("broadcast_notes_log").insert(row);
+      if (logErr) console.error("broadcast_notes_log insert failed:", logErr.message);
+    } catch (e) {
+      console.error("broadcast_notes_log insert threw:", e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // ── Stage 1: Claude generates notes + a structured claims list ────────────
+  // SYSTEM_PROMPT (tone) is unchanged; we add an output-format contract in the
+  // user turn so individual claims can be fact-checked downstream. Stage-1
+  // failures return WITHOUT an audit write (fact-check never ran → NULL).
+  const stage1Prompt =
 `Context: a ${groupName} playoff broadcast.
 
 Spotlight players: ${spotlightNames.join(", ")}.
 
-First: 4-6 punchy numbered one-liners (≤25 words each). Then a blank line. Then 2-3 storyline arcs (short bold headline + 2-3 sentence narrative). Label the sections "ONE-LINERS" and "STORYLINES".
+Write the broadcast notes: 4-6 punchy numbered one-liners (≤25 words each), then a blank line, then 2-3 storyline arcs (short bold headline + 2-3 sentence narrative). Label the sections "ONE-LINERS" and "STORYLINES".
+
+Return ONLY a JSON object (no markdown fences, no text outside the JSON) with exactly these two fields:
+- "notes": a string — the broadcast notes prose described above, in your normal voice.
+- "claims": an array of every factual claim the notes make. Emit one claim per player-name mention, score, hole number, stroke count, date, head-to-head outcome, season-level stat, and historical reference. Each element: { "id": "c1", "claim": "<the specific claim, in plain words>", "source": "round_data" | "general_knowledge" }. Use "round_data" when the claim comes straight from the Data payload below; use "general_knowledge" when it is inferred or drawn from your own training knowledge.
 
 Data:
 \`\`\`json
 ${JSON.stringify(payload, null, 2)}
 \`\`\``;
 
-  // ── Anthropic call ───────────────────────────────────────────────────────
-  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!anthropicKey) {
-    return json({ error: "Broadcast Notes is not configured yet (ANTHROPIC_API_KEY missing). Ask an admin to set the Supabase function secret." }, 503);
-  }
-
-  let notes = "";
+  type Claim = { id: string; claim: string; source: string };
+  let claims: Claim[] = [];
   const t0 = Date.now();
   try {
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -410,50 +486,183 @@ ${JSON.stringify(payload, null, 2)}
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1500,
+        max_tokens: 4000,
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userPrompt }],
+        messages: [{ role: "user", content: stage1Prompt }],
       }),
     });
     const aiText = await aiRes.text();
     if (!aiRes.ok) {
+      console.error("Stage 1 (Claude generate) HTTP error:", aiText.slice(0, 500));
       return json({ error: "Commentary generation failed", details: aiText.slice(0, 500) }, 502);
     }
     const aiJson = JSON.parse(aiText) as { content?: { type: string; text?: string }[] };
-    notes = (aiJson.content ?? [])
+    const raw = (aiJson.content ?? [])
       .filter((b) => b.type === "text" && typeof b.text === "string")
       .map((b) => b.text as string)
       .join("\n")
       .trim();
-    if (!notes) return json({ error: "Commentary generation returned no text" }, 502);
+    if (!raw) return json({ error: "Commentary generation returned no text" }, 502);
+    let parsed: { notes?: unknown; claims?: unknown };
+    try {
+      parsed = JSON.parse(stripJsonFence(raw)) as typeof parsed;
+    } catch {
+      console.error("Stage 1 returned non-JSON output:", raw.slice(0, 1000));
+      return json({ error: "Commentary generation returned malformed JSON" }, 502);
+    }
+    notes = typeof parsed.notes === "string" ? parsed.notes.trim() : "";
+    if (!notes) return json({ error: "Commentary generation returned no notes text" }, 502);
+    if (!Array.isArray(parsed.claims)) {
+      console.error("Stage 1 omitted the claims array:", raw.slice(0, 1000));
+      return json({ error: "Commentary generation returned no claims to fact-check" }, 502);
+    }
+    claims = parsed.claims as Claim[];
   } catch (e) {
+    console.error("Stage 1 (Claude generate) threw:", e instanceof Error ? e.message : String(e));
     return json({ error: "Commentary generation error", details: e instanceof Error ? e.message : String(e) }, 502);
   }
-  const generationMs = Date.now() - t0;
-  const generatedAt = new Date().toISOString();
+  generationMs = Date.now() - t0;
 
-  // ── Best-effort audit log (never fails the request) ──────────────────────
-  try {
-    const hashInput = `${groupId}\n${[...playerIds].sort().join(",")}`;
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(hashInput));
-    const inputHash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { error: logErr } = await admin.from("broadcast_notes_log").insert({
-      user_id: userId,
-      group_id: groupId,
-      player_ids: spotlight.map((p) => p.player_id as string),
-      spotlight_names: spotlightNames,
-      input_hash: inputHash,
-      output_length: notes.length,
-      generation_ms: generationMs,
-      model: MODEL,
-    });
-    if (logErr) console.error("broadcast_notes_log insert failed:", logErr.message);
-  } catch (e) {
-    console.error("broadcast_notes_log insert threw:", e instanceof Error ? e.message : String(e));
+  // ── Stage 2: Perplexity fact-checks each claim ────────────────────────────
+  // From here on, fact-check HAS run: every hard-fail path writes an audit row
+  // with an `error` field before returning, then surfaces the failure.
+  const factCheckSystem =
+`You are a fact-checker. Do NOT rewrite, polish, summarize, or improve any text — only verify.
+
+Verify each claim in the CLAIMS list:
+- source "round_data": check the claim ONLY against the provided DATA payload.
+- source "general_knowledge": verify against public knowledge using web search.
+
+Treat ambiguity as ambiguous, not wrong. Example: "the player who finished 2nd" without saying which season is "ambiguous". Use "wrong" only when the claim contradicts the evidence.
+
+Return ONLY a JSON array (no prose, no markdown fences), one object per claim:
+[{ "id": "<claim id>", "status": "verified" | "wrong" | "ambiguous" | "unverifiable", "correction": "<corrected fact — include only when status is wrong>", "reasoning": "<one concise sentence>" }]`;
+
+  const factCheckUser =
+`DATA payload (ground truth for round_data claims):
+\`\`\`json
+${JSON.stringify(payload, null, 2)}
+\`\`\`
+
+CLAIMS to verify:
+\`\`\`json
+${JSON.stringify(claims, null, 2)}
+\`\`\``;
+
+  type Annotation = { id: string; status: string; correction?: string; reasoning: string };
+  let annotations: Annotation[] = [];
+  {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FACT_CHECK_TIMEOUT_MS);
+    let pplxText = "";
+    try {
+      const res = await fetch(PERPLEXITY_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${perplexityKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: PERPLEXITY_MODEL,
+          messages: [
+            { role: "system", content: factCheckSystem },
+            { role: "user", content: factCheckUser },
+          ],
+        }),
+        signal: ctrl.signal,
+      });
+      pplxText = await res.text();
+      if (!res.ok) {
+        const reason = `Perplexity API returned ${res.status}`;
+        console.error("Stage 2 (Perplexity) HTTP error:", res.status, pplxText.slice(0, 500));
+        await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason });
+        return json({ error: `Fact-check failed: ${reason}. Retry or re-run without fact-check.`, perplexity_error: pplxText.slice(0, 500) }, 502);
+      }
+    } catch (e) {
+      const aborted = (e as { name?: string })?.name === "AbortError";
+      const reason = aborted ? `timed out after ${FACT_CHECK_TIMEOUT_MS / 1000}s` : (e instanceof Error ? e.message : String(e));
+      console.error("Stage 2 (Perplexity) failed:", reason);
+      await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason });
+      return json({ error: `Fact-check failed: ${reason}. Retry or re-run without fact-check.`, perplexity_error: reason }, 502);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    // Parse the OpenAI-compatible envelope, then the JSON array inside it.
+    try {
+      const pj = JSON.parse(pplxText) as { choices?: { message?: { content?: string } }[] };
+      const content = pj.choices?.[0]?.message?.content ?? "";
+      const arr = JSON.parse(stripJsonFence(content));
+      if (!Array.isArray(arr)) throw new Error("fact-check result is not a JSON array");
+      annotations = arr as Annotation[];
+    } catch (e) {
+      const reason = "Perplexity returned malformed JSON";
+      console.error("Stage 2 (Perplexity) malformed response:", e instanceof Error ? e.message : String(e), "\nRAW:", pplxText.slice(0, 2000));
+      await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason });
+      return json({ error: `Fact-check failed: ${reason}. Retry or re-run without fact-check.`, perplexity_error: pplxText.slice(0, 500) }, 502);
+    }
   }
 
-  return json({ notes, generated_at: generatedAt, spotlight_names: spotlightNames }, 200);
+  // ── Stage 3: Claude integrates the corrections it agrees with ─────────────
+  // Same model + tone prompt as stage 1, so the voice is preserved. On failure
+  // the audit row keeps the stage-2 annotations we already have, plus an error.
+  const stage3Prompt =
+`Here are your original broadcast notes:
+
+${notes}
+
+A fact-checker reviewed them and returned these annotations (JSON):
+\`\`\`json
+${JSON.stringify(annotations, null, 2)}
+\`\`\`
+
+Apply the corrections you agree with. Preserve your original voice and energy. Tighten any ambiguity. Return only the revised notes prose — no JSON, no explanation, no preamble.`;
+
+  let revised = "";
+  try {
+    const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 2000,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: stage3Prompt }],
+      }),
+    });
+    const aiText = await aiRes.text();
+    if (!aiRes.ok) {
+      console.error("Stage 3 (Claude integrate) HTTP error:", aiText.slice(0, 500));
+      await writeAudit({ annotations, perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: `Claude integration returned ${aiRes.status}` });
+      return json({ error: "Fact-check integration failed", details: aiText.slice(0, 500) }, 502);
+    }
+    const aiJson = JSON.parse(aiText) as { content?: { type: string; text?: string }[] };
+    revised = (aiJson.content ?? [])
+      .filter((b) => b.type === "text" && typeof b.text === "string")
+      .map((b) => b.text as string)
+      .join("\n")
+      .trim();
+    if (!revised) {
+      console.error("Stage 3 (Claude integrate) returned no text");
+      await writeAudit({ annotations, perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: "Claude integration returned no text" });
+      return json({ error: "Fact-check integration returned no text" }, 502);
+    }
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    console.error("Stage 3 (Claude integrate) threw:", reason);
+    await writeAudit({ annotations, perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: `Claude integration error: ${reason}` });
+    return json({ error: "Fact-check integration error", details: reason }, 502);
+  }
+
+  // Success: the revised prose is what we return and what output_length reflects.
+  notes = revised;
+  await writeAudit({ annotations, perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt });
+
+  return json({
+    notes,
+    generated_at: generatedAt,
+    spotlight_names: spotlightNames,
+    fact_check: { annotations, status: "ok", perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL },
+  }, 200);
 });
