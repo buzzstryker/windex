@@ -179,14 +179,11 @@ export function BroadcastNotesAuditDetail() {
         </div>
       </div>
 
-      {/* 1. Generated notes (prose) */}
-      <div className="card">
-        <h2>Generated notes</h2>
-        <p style={{ color: '#888', fontSize: 13, margin: 0 }}>
-          Notes prose not stored — see PWA or function response logs. (Only the claims, fact-check
-          verdicts, and input payload are persisted on the audit row.)
-        </p>
-      </div>
+      {/* 1. Generated notes — the prose isn't persisted; keep this subtle (info,
+          not an error). Plain grey italic line, no notice card. */}
+      <p style={{ color: '#999', fontSize: 12, fontStyle: 'italic', margin: '0 0 16px 4px' }}>
+        ℹ Notes prose isn't stored on the audit row — view it in the PWA or the function logs.
+      </p>
 
       {/* 2. Claims + annotations */}
       <div className="card">
@@ -222,7 +219,14 @@ export function BroadcastNotesAuditDetail() {
             {annotations.length === 0 ? (
               <p style={{ color: '#888', fontSize: 13 }}>No claims recorded.</p>
             ) : filtered.length === 0 ? (
-              <p style={{ color: '#888', fontSize: 13 }}>No claims match this filter.</p>
+              filter === 'wrong_ambiguous' ? (
+                <p style={{ color: '#2e7d32', fontSize: 13 }}>
+                  ✓ All claims verified — no wrong or ambiguous flags in this generation.{' '}
+                  ({annotations.length} total claims — switch filter to 'All' to view them.)
+                </p>
+              ) : (
+                <p style={{ color: '#888', fontSize: 13 }}>No claims match this filter.</p>
+              )
             ) : (
               <div className="table-wrap">
                 <table>
