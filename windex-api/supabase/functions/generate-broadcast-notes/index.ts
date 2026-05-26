@@ -454,9 +454,13 @@ serve(async (req) => {
   };
 
   // ── Stage 1: Claude generates notes + a structured claims list ────────────
-  // SYSTEM_PROMPT (tone) is unchanged; we add an output-format contract in the
-  // user turn so individual claims can be fact-checked downstream. Stage-1
-  // failures return WITHOUT an audit write (fact-check never ran → NULL).
+  // SYSTEM_PROMPT (tone) is unchanged. Output is collected via a forced
+  // tool call (submit_broadcast_notes) so the structured payload is guaranteed
+  // well-formed JSON from the API — no text parsing, no fence stripping, and
+  // none of the malformed/partial-JSON failure classes. max_tokens is 8000 so
+  // a full prose+claims response has comfortable headroom (4000 truncated in
+  // production). Stage-1 failures return WITHOUT an audit write (fact-check
+  // never ran → NULL).
   const stage1Prompt =
 `Context: a ${groupName} playoff broadcast.
 
@@ -464,14 +468,38 @@ Spotlight players: ${spotlightNames.join(", ")}.
 
 Write the broadcast notes: 4-6 punchy numbered one-liners (≤25 words each), then a blank line, then 2-3 storyline arcs (short bold headline + 2-3 sentence narrative). Label the sections "ONE-LINERS" and "STORYLINES".
 
-Return ONLY a JSON object (no markdown fences, no text outside the JSON) with exactly these two fields:
-- "notes": a string — the broadcast notes prose described above, in your normal voice.
-- "claims": an array of every factual claim the notes make. Emit one claim per player-name mention, score, hole number, stroke count, date, head-to-head outcome, season-level stat, and historical reference. Each element: { "id": "c1", "claim": "<the specific claim, in plain words>", "source": "round_data" | "general_knowledge" }. Use "round_data" when the claim comes straight from the Data payload below; use "general_knowledge" when it is inferred or drawn from your own training knowledge.
+Submit your result with the submit_broadcast_notes tool:
+- "notes": the broadcast notes prose described above, in your normal voice.
+- "claims": every factual claim the notes make. Emit one claim per player-name mention, score, hole number, stroke count, date, head-to-head outcome, season-level stat, and historical reference. For each claim, set "source" to "round_data" when it comes straight from the Data payload below, or "general_knowledge" when it is inferred or drawn from your own training knowledge.
 
 Data:
 \`\`\`json
 ${JSON.stringify(payload, null, 2)}
 \`\`\``;
+
+  const submitNotesTool = {
+    name: "submit_broadcast_notes",
+    description: "Submit the broadcast notes prose and the structured list of factual claims it makes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        notes: { type: "string", description: "The broadcast notes prose in Buzz's preferred voice." },
+        claims: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              claim: { type: "string" },
+              source: { type: "string", enum: ["round_data", "general_knowledge"] },
+            },
+            required: ["id", "claim", "source"],
+          },
+        },
+      },
+      required: ["notes", "claims"],
+    },
+  };
 
   type Claim = { id: string; claim: string; source: string };
   let claims: Claim[] = [];
@@ -486,8 +514,10 @@ ${JSON.stringify(payload, null, 2)}
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 4000,
+        max_tokens: 8000,
         system: SYSTEM_PROMPT,
+        tools: [submitNotesTool],
+        tool_choice: { type: "tool", name: "submit_broadcast_notes" },
         messages: [{ role: "user", content: stage1Prompt }],
       }),
     });
@@ -496,24 +526,27 @@ ${JSON.stringify(payload, null, 2)}
       console.error("Stage 1 (Claude generate) HTTP error:", aiText.slice(0, 500));
       return json({ error: "Commentary generation failed", details: aiText.slice(0, 500) }, 502);
     }
-    const aiJson = JSON.parse(aiText) as { content?: { type: string; text?: string }[] };
-    const raw = (aiJson.content ?? [])
-      .filter((b) => b.type === "text" && typeof b.text === "string")
-      .map((b) => b.text as string)
-      .join("\n")
-      .trim();
-    if (!raw) return json({ error: "Commentary generation returned no text" }, 502);
-    let parsed: { notes?: unknown; claims?: unknown };
-    try {
-      parsed = JSON.parse(stripJsonFence(raw)) as typeof parsed;
-    } catch {
-      console.error("Stage 1 returned non-JSON output:", raw.slice(0, 1000));
-      return json({ error: "Commentary generation returned malformed JSON" }, 502);
+    const aiJson = JSON.parse(aiText) as {
+      stop_reason?: string;
+      content?: { type: string; input?: unknown; text?: string }[];
+    };
+    // Truncation surfaces as stop_reason "max_tokens" (vs the expected
+    // "tool_use"); fail loudly and specifically rather than as a vague parse
+    // error downstream.
+    if (aiJson.stop_reason === "max_tokens") {
+      console.error("Stage 1 truncated at max_tokens");
+      return json({ error: "Stage 1 truncated — increase max_tokens or reduce input size" }, 502);
     }
+    const toolUse = (aiJson.content ?? []).find((b) => b.type === "tool_use");
+    if (!toolUse || typeof toolUse.input !== "object" || toolUse.input === null) {
+      console.error("Stage 1 returned no tool_use block:", aiText.slice(0, 1000));
+      return json({ error: "Commentary generation returned no structured output" }, 502);
+    }
+    const parsed = toolUse.input as { notes?: unknown; claims?: unknown };
     notes = typeof parsed.notes === "string" ? parsed.notes.trim() : "";
     if (!notes) return json({ error: "Commentary generation returned no notes text" }, 502);
     if (!Array.isArray(parsed.claims)) {
-      console.error("Stage 1 omitted the claims array:", raw.slice(0, 1000));
+      console.error("Stage 1 tool output omitted the claims array:", JSON.stringify(toolUse.input).slice(0, 1000));
       return json({ error: "Commentary generation returned no claims to fact-check" }, 502);
     }
     claims = parsed.claims as Claim[];
@@ -626,7 +659,7 @@ Apply the corrections you agree with. Preserve your original voice and energy. T
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 2000,
+        max_tokens: 8000,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: stage3Prompt }],
       }),
@@ -637,7 +670,14 @@ Apply the corrections you agree with. Preserve your original voice and energy. T
       await writeAudit({ annotations, perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: `Claude integration returned ${aiRes.status}` });
       return json({ error: "Fact-check integration failed", details: aiText.slice(0, 500) }, 502);
     }
-    const aiJson = JSON.parse(aiText) as { content?: { type: string; text?: string }[] };
+    const aiJson = JSON.parse(aiText) as { stop_reason?: string; content?: { type: string; text?: string }[] };
+    // Same truncation guard as stage 1: fail specifically on max_tokens rather
+    // than silently returning half-revised prose.
+    if (aiJson.stop_reason === "max_tokens") {
+      console.error("Stage 3 truncated at max_tokens");
+      await writeAudit({ annotations, perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: "Claude integration truncated at max_tokens" });
+      return json({ error: "Stage 3 truncated — increase max_tokens or reduce input size" }, 502);
+    }
     revised = (aiJson.content ?? [])
       .filter((b) => b.type === "text" && typeof b.text === "string")
       .map((b) => b.text as string)
