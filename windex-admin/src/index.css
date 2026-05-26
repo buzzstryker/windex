@@ -25,6 +25,15 @@ tr:hover { background: #f9f9f9; }
 .badge.duplicate_ignored { background: #f5f5f5; color: #616161; }
 .badge.attributed { background: #e8f5e9; color: #2e7d32; }
 .badge.attribution_resolved { background: #e3f2fd; color: #1565c0; }
+/* Broadcast Notes audit — fact-check verdicts + claim sources. */
+.badge.verified { background: #e8f5e9; color: #2e7d32; }
+.badge.wrong { background: #ffebee; color: #c62828; }
+.badge.ambiguous { background: #fff3e0; color: #e65100; }
+.badge.unverifiable { background: #f5f5f5; color: #616161; }
+.badge.none { background: #f5f5f5; color: #616161; }
+.badge.fcerror { background: #ffebee; color: #c62828; }
+.badge.source-round_data { background: #e3f2fd; color: #1565c0; }
+.badge.source-general_knowledge { background: #ede7f6; color: #6a1b9a; }
 tr.selected-row { background: #e3f2fd !important; }
 .filter-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
 .filter-bar label { display: flex; align-items: center; gap: 6px; }

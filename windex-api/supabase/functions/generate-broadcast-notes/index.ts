@@ -432,6 +432,12 @@ serve(async (req) => {
   // revised prose on success, so output_length always matches what we return.
   let notes = "";
   let generationMs = 0;
+  // Stage-1 claims, persisted alongside the fact-check annotations in
+  // fact_check_audit so the audit UI can show claim text + source (not just the
+  // verdict). Declared here so writeAudit can read it; populated by stage 1
+  // before any audit write (writeAudit only runs from stage 2 onward).
+  type Claim = { id: string; claim: string; source: string };
+  let claims: Claim[] = [];
   const writeAudit = async (factCheckAudit: Record<string, unknown> | null) => {
     try {
       const hashInput = `${groupId}\n${[...playerIds].sort().join(",")}`;
@@ -463,7 +469,9 @@ serve(async (req) => {
         model: MODEL,
         input_data: inputData,
       };
-      if (factCheckAudit !== null) row.fact_check_audit = factCheckAudit;
+      // claims first, then the fact-check fields (annotations, models,
+      // generated_at, plus error on hard-fail paths) from the caller.
+      if (factCheckAudit !== null) row.fact_check_audit = { claims, ...factCheckAudit };
       const { error: logErr } = await admin.from("broadcast_notes_log").insert(row);
       if (logErr) console.error("broadcast_notes_log insert failed:", logErr.message);
     } catch (e) {
@@ -519,8 +527,6 @@ ${JSON.stringify(payload, null, 2)}
     },
   };
 
-  type Claim = { id: string; claim: string; source: string };
-  let claims: Claim[] = [];
   const t0 = Date.now();
   try {
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
