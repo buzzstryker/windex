@@ -50,6 +50,14 @@ const PERPLEXITY_MODEL = "sonar-pro";
 const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
 const FACT_CHECK_TIMEOUT_MS = 30_000;
 
+// Per Buzz: full Cup finishing order was only entered starting with the 2025
+// season. Earlier seasons hold at most a winner (backfill) or a partial top-N,
+// so a season can only be classified "complete" from this year on — even if an
+// older season's recorded places happen to be gap-free (a top-3 of a larger
+// field looks gap-free). NOTE: this is a single hardcoded cutoff; if other
+// groups reached full-results parity in a different year, make it per-group.
+const CUP_FULL_RESULTS_FROM_YEAR = 2025;
+
 // Claude and Perplexity occasionally wrap JSON in ```json fences despite being
 // told not to. Strip a single surrounding fence before JSON.parse.
 function stripJsonFence(text: string): string {
@@ -67,6 +75,8 @@ Rules:
 - Tone: confident, punchy, broadcast-style. Hyperbole is fine when the data backs it.
 - Surface tension: rivalries (close H2H), dominance (lopsided H2H), comebacks, choking history (poor signature-event from strong regular-season players), championship pedigree.
 - Game points data is mostly NULL pre-2026 — do NOT cite career total_game_points. Use total_score_value, head-to-head records, and championship/streak data instead.
+- Cup Championship finishing history is a primary commentary category, alongside head-to-head records, signature events, and points standings.
+- Cup data completeness: make finishing-position claims only for seasons whose data_completeness is "complete", or where a player's specific place is recorded for that season. For "partial" or "winner_only" seasons, cite only the recorded winner and any recorded places — never infer unrecorded positions. If a player's Cup results have gaps, acknowledge the gap honestly rather than guessing.
 - No emojis. No markdown headers. Use **bold** only for storyline headlines when format calls for it.`;
 
 type RoundRow = { id: string; season_id: string | null; round_date: string; is_signature_event: number };
@@ -253,6 +263,65 @@ serve(async (req) => {
     pointsChampBySeason.set(sid, top.player_id);
   }
 
+  // ── Cup Championship finishing history (championship_results, migration 032) ─
+  // Full finishing order per season (place, ties allowed). Older seasons were
+  // backfilled with only the place=1 winner, so completeness varies by season.
+  const { data: crRows, error: crErr } = await caller
+    .from("championship_results")
+    .select("season_id, player_id, place")
+    .eq("group_id", groupId);
+  if (crErr) return json({ error: "Failed to fetch championship results", details: crErr.message }, 500);
+
+  const seasonById = new Map(seasons.map((s) => [s.id, s]));
+  type CR = { player_id: string; place: number };
+  const crBySeason = new Map<string, CR[]>();
+  for (const r of (crRows ?? []) as { season_id: string; player_id: string; place: number }[]) {
+    if (!seasonById.has(r.season_id)) continue; // defensive group-scope guard
+    if (!crBySeason.has(r.season_id)) crBySeason.set(r.season_id, []);
+    crBySeason.get(r.season_id)!.push({ player_id: r.player_id, place: r.place });
+  }
+
+  // Per-season derived metadata, including data_completeness inferred from the
+  // recorded rows (no expected field-size is stored, so this describes exactly
+  // what the data contains):
+  //   winner_only — only the champion is recorded (max place = 1).
+  //   complete    — places form a gap-free competition ranking (every slot
+  //                 1..N accounted for, ties allowed: 1,2,2,4...).
+  //   partial     — places beyond the winner are recorded, but with gaps.
+  type CupSeasonMeta = {
+    season_id: string; label: string; year: number; total_participants: number;
+    max_place: number; winner_id: string | null;
+    completeness: "complete" | "partial" | "winner_only";
+  };
+  const cupSeasonMeta = new Map<string, CupSeasonMeta>();
+  for (const [sid, rows] of crBySeason) {
+    const s = seasonById.get(sid)!;
+    const year = seasonYear(s);
+    const places = rows.map((r) => r.place).sort((a, b) => a - b);
+    const maxPlace = places[places.length - 1];
+    let completeness: "complete" | "partial" | "winner_only";
+    if (maxPlace === 1) {
+      completeness = "winner_only";
+    } else {
+      // Gap-free competition ranking: each sorted place is either a tie with the
+      // prior one or equals its 1-indexed position (1,2,2,4 ok; 1,2,4 has a gap).
+      let gapless = places[0] === 1;
+      for (let i = 1; i < places.length && gapless; i++) {
+        if (!(places[i] === places[i - 1] || places[i] === i + 1)) gapless = false;
+      }
+      // Only seasons from the full-results era can be "complete" (see constant):
+      // an older gap-free set may still be a partial top-N of a larger field.
+      completeness = gapless && year >= CUP_FULL_RESULTS_FROM_YEAR ? "complete" : "partial";
+    }
+    const winner_id = s.cup_champion_player_id ?? rows.find((r) => r.place === 1)?.player_id ?? null;
+    cupSeasonMeta.set(sid, {
+      season_id: sid, label: String(year), year, total_participants: rows.length,
+      max_place: maxPlace, winner_id, completeness,
+    });
+  }
+  // Ensure cup winners' names get resolved alongside the other ids.
+  for (const m of cupSeasonMeta.values()) if (m.winner_id) champIds.add(m.winner_id);
+
   // Resolve every name we need (spotlight + cup champs + points champs).
   const nameIds = new Set<string>(playerIds);
   for (const id of champIds) nameIds.add(id);
@@ -266,6 +335,59 @@ serve(async (req) => {
     .filter((s) => s.cup_champion_player_id)
     .map((s) => ({ year: seasonYear(s), winner: nm(s.cup_champion_player_id as string) }))
     .sort((a, b) => a.year - b.year);
+
+  // Top-level Cup context for comparative storylines (one entry per season that
+  // has any championship_results rows), oldest → newest.
+  const championships_played = [...cupSeasonMeta.values()]
+    .sort((a, b) => a.year - b.year)
+    .map((m) => ({
+      season: m.label,
+      total_participants: m.total_participants,
+      winner: m.winner_id ? nm(m.winner_id) : null,
+      data_completeness: m.completeness,
+    }));
+
+  // Per-spotlight-player Cup finishing history. last_place_finishes only counts
+  // seasons known "complete" (the true field size is known there); for
+  // winner_only/partial seasons the recorded max place is not necessarily last.
+  const cupHistoryFor = (id: string) => {
+    const appearances: { sid: string; year: number; label: string; place: number; total: number; completeness: string }[] = [];
+    for (const [sid, rows] of crBySeason) {
+      const mine = rows.find((r) => r.player_id === id);
+      if (!mine) continue;
+      const meta = cupSeasonMeta.get(sid)!;
+      appearances.push({ sid, year: meta.year, label: meta.label, place: mine.place, total: meta.total_participants, completeness: meta.completeness });
+    }
+    appearances.sort((a, b) => a.year - b.year);
+    const results_by_season = appearances.map((a) => ({
+      season: a.label, place: a.place, total_participants: a.total, data_completeness: a.completeness,
+    }));
+    const seasons_not_participated = [...cupSeasonMeta.values()]
+      .filter((m) => !appearances.some((a) => a.sid === m.season_id))
+      .sort((a, b) => a.year - b.year)
+      .map((m) => m.label);
+    if (appearances.length === 0) {
+      return {
+        total_appearances: 0, wins: 0, top_3_finishes: 0, last_place_finishes: 0,
+        best_finish: null, worst_finish: null, average_finish: null,
+        results_by_season, seasons_not_participated,
+      };
+    }
+    // best = lowest place, worst = highest place; ties broken by most recent season.
+    const byBest = [...appearances].sort((a, b) => a.place - b.place || b.year - a.year)[0];
+    const byWorst = [...appearances].sort((a, b) => b.place - a.place || b.year - a.year)[0];
+    return {
+      total_appearances: appearances.length,
+      wins: appearances.filter((a) => a.place === 1).length,
+      top_3_finishes: appearances.filter((a) => a.place <= 3).length,
+      last_place_finishes: appearances.filter((a) => a.completeness === "complete" && a.place === cupSeasonMeta.get(a.sid)!.max_place).length,
+      best_finish: { place: byBest.place, season: byBest.label },
+      worst_finish: { place: byWorst.place, season: byWorst.label },
+      average_finish: Math.round((appearances.reduce((s, a) => s + a.place, 0) / appearances.length) * 10) / 10,
+      results_by_season,
+      seasons_not_participated,
+    };
+  };
 
   const points_champion_history = seasons
     .filter((s) => s.id !== currentSeasonId && (s.end_date || "") < today && pointsChampBySeason.has(s.id))
@@ -357,6 +479,7 @@ serve(async (req) => {
     }
 
     player.championships = { cup_wins: cupWins(id), points_champion_wins: pointsWins(id) };
+    player.cup_championship_history = cupHistoryFor(id);
 
     // Head-to-head: ONLY among the other spotlight players in this request.
     const myByRid = new Map(rs.map((r) => [r.rid, r.v]));
@@ -395,12 +518,13 @@ serve(async (req) => {
       : { current_season: null },
     data_caveats: [
       "game_points is NULL for most pre-2026 imported rounds; career/season game_points are partial sums over rounds where it was recorded — do not cite career total_game_points.",
-      "Cup runners-up / full finish order are not stored — only the winner per season.",
+      "Cup Championship finishing order is recorded in championship_results but is incomplete for older seasons — see group_context.championships_played[].data_completeness (complete | partial | winner_only) and each spotlight player's cup_championship_history. Only claim finishing positions for seasons marked complete, or where a player's specific place is recorded; for partial/winner_only seasons cite only the recorded winner and recorded places.",
       "Early seasons may have been imported as aggregated single-summary rounds, so per-round granularity for those years is coarse.",
       "Retired players are excluded from selection.",
     ],
     cup_championship_history,
     points_champion_history,
+    group_context: { championships_played },
     spotlight_players: spotlight,
   };
 
@@ -492,7 +616,9 @@ serve(async (req) => {
 
 Spotlight players: ${spotlightNames.join(", ")}.
 
-Write the broadcast notes: 4-6 punchy numbered one-liners (≤25 words each), then a blank line, then 2-3 storyline arcs (short bold headline + 2-3 sentence narrative). Label the sections "ONE-LINERS" and "STORYLINES".
+Write the broadcast notes: 4-6 punchy numbered one-liners (≤25 words each), then a blank line, then 2-3 storyline arcs (short bold headline + 2-3 sentence narrative), then a Cup Championship history section when there's enough material. Label the sections "ONE-LINERS", "STORYLINES", and "CUP CHAMPIONSHIP HISTORY".
+
+The Cup Championship history section stands on its own (not woven into the other storylines). Cover individual players' Cup Championship trajectories (their best and worst showings, recent trends, championship wins or droughts) AND comparative storylines that pit the spotlight players' Cup histories against each other. Honor the Cup data-completeness rule: only claim finishing positions the data actually records.
 
 Submit your result with the submit_broadcast_notes tool:
 - "notes": the broadcast notes prose described above, in your normal voice.
