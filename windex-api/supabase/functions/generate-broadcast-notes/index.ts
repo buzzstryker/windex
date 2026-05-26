@@ -592,6 +592,10 @@ Verify each claim in the CLAIMS list:
 
 Treat ambiguity as ambiguous, not wrong. Example: "the player who finished 2nd" without saying which season is "ambiguous". Use "wrong" only when the claim contradicts the evidence.
 
+When verifying head-to-head records and other symmetric relational data, note that "X is N-M against Y" and "Y is M-N against X" are equivalent statements about the same underlying data. A claim like "Bübes is 1-0 against FJ" is correct as long as the payload shows Bübes with 1 win and 0 losses vs FJ — the phrasing direction does not make a claim wrong. Flag a claim as "wrong" only when the numbers themselves don't match the payload, not when the perspective or phrasing differs from how you would express it.
+
+Before returning each annotation, perform a self-consistency check: read your \`correction\` field and compare it to the original \`claim\`. If the correction is semantically identical to the claim (same numbers, same teams, same relationship — only phrasing differs), then the claim was correct and your status must be \`verified\`, not \`wrong\`. If your \`reasoning\` field supports the original claim, your status must align — do not flag \`wrong\` when your reasoning confirms the claim is true.
+
 Return ONLY a JSON array (no prose, no markdown fences), one object per claim:
 [{ "id": "<claim id>", "status": "verified" | "wrong" | "ambiguous" | "unverifiable", "correction": "<corrected fact — include only when status is wrong>", "reasoning": "<one concise sentence>" }]`;
 
