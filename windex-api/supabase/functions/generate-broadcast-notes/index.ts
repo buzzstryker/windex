@@ -72,7 +72,9 @@ Rules:
 - Tone: confident, punchy, broadcast-style. Hyperbole is fine when the data backs it.
 - Surface tension: rivalries (close H2H), dominance (lopsided H2H), comebacks, choking history (poor signature-event from strong regular-season players), championship pedigree.
 - Game points data is mostly NULL pre-2026 — do NOT cite career total_game_points. Use total_score_value, head-to-head records, and championship/streak data instead.
-- Cup Championship finishing history is a primary commentary category, alongside head-to-head records, signature events, and points standings.
+- Cup Championship finishing history is a primary commentary category, alongside head-to-head records, tournament performance (signature events AND regular events), and points standings.
+- Tournament performance is split into signature events and regular events. Cover both in parallel — a player's signature-event record and their regular-event record are equally worth discussing; don't default to signature events as more important. A player can dominate regular events but struggle in signature events (or vice versa), and that contrast is itself a storyline. Treat money won and money lost symmetrically across both buckets.
+- Head-to-head records are split between signature events and regular events. Players may dominate an opponent in one bucket and lose to them in the other — cover both when discussing rivalries; a 5-3 signature edge alongside a 50-52 regular edge tells a richer story than a combined record would.
 - Cup data completeness: make finishing-position claims only for seasons whose data_completeness is "complete", or where a player's specific place is recorded for that season. For "partial" or "winner_only" seasons, cite only the recorded winner and any recorded places — never infer unrecorded positions. If a player's Cup results have gaps, acknowledge the gap honestly rather than guessing.
 - No emojis. No markdown headers. Use **bold** only for storyline headlines when format calls for it.`;
 
@@ -414,6 +416,24 @@ serve(async (req) => {
     });
   }
 
+  // Per-bucket tournament stats (signature vs regular), identical shape so both
+  // buckets get equal-weight coverage. money_won/money_lost split the signed
+  // effective score (r.v): positive rows = money won, negative rows = money lost.
+  const bucketStats = (rows: PR[]) => {
+    if (rows.length === 0) return { total: 0 };
+    const best = rows.reduce((a, b) => (b.v > a.v ? b : a));
+    return {
+      total: rows.length,
+      total_score_value: rows.reduce((s, r) => s + r.v, 0),
+      wins: rows.filter((r) => r.v > 0).length,
+      losses: rows.filter((r) => r.v < 0).length,
+      ties: rows.filter((r) => r.v === 0).length,
+      money_won: rows.filter((r) => r.v > 0).reduce((s, r) => s + r.v, 0),
+      money_lost: rows.filter((r) => r.v < 0).reduce((s, r) => s + r.v, 0),
+      best_finish: { date: best.d, score_value: best.v },
+    };
+  };
+
   // ── Build spotlight_players ──────────────────────────────────────────────
   const spotlight = playerIds.map((id) => {
     const rs = byPlayer.get(id)!;
@@ -458,40 +478,40 @@ serve(async (req) => {
       }
       player.streaks = { current_streak_type: cur, current_streak_length: curLen, longest_win_streak: lw, longest_loss_streak: ll };
 
-      const sig = rs.filter((r) => r.sig);
-      if (sig.length === 0) {
-        player.signature_events = { total: 0 };
-      } else {
-        const sBest = sig.reduce((a, b) => (b.v > a.v ? b : a));
-        player.signature_events = {
-          total: sig.length,
-          total_score_value: sig.reduce((s, r) => s + r.v, 0),
-          wins: sig.filter((r) => r.v > 0).length,
-          best_finish: { date: sBest.d, score_value: sBest.v },
-        };
-      }
     } else {
       player.career = { total_rounds: 0, total_score_value: 0, biggest_single_round_swing: 0 };
-      player.signature_events = { total: 0 };
     }
+
+    // Tournament performance, split into two parallel buckets with the SAME
+    // shape (incl. a won/lost money split) so regular events carry equal weight
+    // with signature events. bucketStats handles the empty-bucket case (total 0).
+    player.signature_events = bucketStats(rs.filter((r) => r.sig));
+    player.regular_events = bucketStats(rs.filter((r) => !r.sig));
 
     player.championships = { cup_wins: cupWins(id), points_champion_wins: pointsWins(id) };
     player.cup_championship_history = cupHistoryFor(id);
 
-    // Head-to-head: ONLY among the other spotlight players in this request.
+    // Head-to-head: ONLY among the other spotlight players in this request,
+    // split into signature vs regular buckets. A shared round has one
+    // is_signature flag, so orow.sig classifies it for both players. The
+    // combined record is intentionally dropped (buckets tell separate stories).
     const myByRid = new Map(rs.map((r) => [r.rid, r.v]));
-    const h2h: Record<string, unknown> = {};
+    const h2h: unknown[] = [];
     for (const oid of playerIds) {
       if (oid === id) continue;
-      let rt = 0, w = 0, l = 0, t = 0, net = 0;
+      const mk = () => ({ rounds_together: 0, wins: 0, losses: 0, ties: 0, score_value_delta: 0 });
+      const sigB = mk(), regB = mk();
       for (const orow of byPlayer.get(oid)!) {
-        if (myByRid.has(orow.rid)) {
-          const me = myByRid.get(orow.rid)!;
-          rt++; net += me - orow.v;
-          if (me > orow.v) w++; else if (me < orow.v) l++; else t++;
-        }
+        if (!myByRid.has(orow.rid)) continue;
+        const me = myByRid.get(orow.rid)!;
+        const b = orow.sig ? sigB : regB;
+        b.rounds_together++;
+        b.score_value_delta += me - orow.v;
+        if (me > orow.v) b.wins++; else if (me < orow.v) b.losses++; else b.ties++;
       }
-      if (rt > 0) h2h[nm(oid)] = { rounds_together: rt, wins: w, losses: l, ties: t, net_score_value: net };
+      if (sigB.rounds_together + regB.rounds_together > 0) {
+        h2h.push({ opponent: nm(oid), signature_events: sigB, regular_events: regB });
+      }
     }
     player.head_to_head = h2h;
     return player;
