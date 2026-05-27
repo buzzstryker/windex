@@ -73,12 +73,13 @@ Rules:
 - Surface tension: rivalries (close H2H), dominance (lopsided H2H), comebacks, choking history (poor signature-event from strong regular-season players), championship pedigree.
 - Game points data is mostly NULL pre-2026 — do NOT cite career total_game_points. Use total_score_value, head-to-head records, and championship/streak data instead.
 - Cup Championship finishing history is a primary commentary category, alongside head-to-head records, tournament performance (signature events AND regular events), and points standings.
+- Detailed round-by-round records begin in 2023. Pre-2023 data is limited to points championship finishing positions per season — no per-round tournament results, no per-event signature/regular bucketing, no per-round head-to-head outcomes. When discussing player history that spans the 2020–2022 era, refer to points championship results only, and acknowledge the data boundary naturally when a player's career predates 2023 (for example: "Detailed records start in 2023, but FJ's points championship pedigree goes back to 2020"). Weave this in naturally — never as a disclaimer block.
 - Tournament performance is split into signature events and regular events. Cover both in parallel — a player's signature-event record and their regular-event record are equally worth discussing; don't default to signature events as more important. A player can dominate regular events but struggle in signature events (or vice versa), and that contrast is itself a storyline. Treat money won and money lost symmetrically across both buckets.
 - Head-to-head records are split between signature events and regular events. Players may dominate an opponent in one bucket and lose to them in the other — cover both when discussing rivalries; a 5-3 signature edge alongside a 50-52 regular edge tells a richer story than a combined record would.
 - Cup data completeness: make finishing-position claims only for seasons whose data_completeness is "complete", or where a player's specific place is recorded for that season. For "partial" or "winner_only" seasons, cite only the recorded winner and any recorded places — never infer unrecorded positions. If a player's Cup results have gaps, acknowledge the gap honestly rather than guessing.
 - No emojis. No markdown headers. Use **bold** only for storyline headlines when format calls for it.`;
 
-type RoundRow = { id: string; season_id: string | null; round_date: string; is_signature_event: number };
+type RoundRow = { id: string; season_id: string | null; round_date: string; row_type: string };
 type ScoreRow = { league_round_id: string; player_id: string; score_value: number | null; score_override: number | null; game_points: number | null };
 type SeasonRow = { id: string; start_date: string; end_date: string; cup_champion_player_id: string | null };
 
@@ -192,13 +193,17 @@ serve(async (req) => {
     while (true) {
       const { data: page, error } = await caller
         .from("league_rounds")
-        .select("id, season_id, round_date, is_signature_event")
+        .select("id, season_id, round_date, row_type")
         .eq("group_id", groupId)
         .order("round_date")
         .range(offset, offset + PAGE - 1);
       if (error) return json({ error: "Failed to fetch rounds", details: error.message }, 500);
       const rows = (page ?? []) as RoundRow[];
-      groupRounds.push(...rows);
+      // Exclude pre-2023 season_aggregate rows (migration 035): they are not
+      // real rounds, so they must not enter ANY round-level stat (career,
+      // streaks, recent form, signature/regular buckets, or head-to-head).
+      // Pre-2023 points history is preserved separately via season_standings.
+      groupRounds.push(...rows.filter((r) => r.row_type !== "season_aggregate"));
       if (rows.length < PAGE) break;
       offset += PAGE;
     }
@@ -233,7 +238,7 @@ serve(async (req) => {
     if (!r) continue;
     byPlayer.get(s.player_id)!.push({
       rid: r.id, d: r.round_date, sid: r.season_id,
-      sig: r.is_signature_event === 1, v: eff(s), gp: s.game_points,
+      sig: r.row_type === "signature_round", v: eff(s), gp: s.game_points,
     });
   }
   for (const arr of byPlayer.values()) {
@@ -536,7 +541,7 @@ serve(async (req) => {
     data_caveats: [
       "game_points is NULL for most pre-2026 imported rounds; career/season game_points are partial sums over rounds where it was recorded — do not cite career total_game_points.",
       "Cup Championship finishing order is recorded in championship_results but is incomplete for older seasons — see group_context.championships_played[].data_completeness (complete | partial | winner_only) and each spotlight player's cup_championship_history. Only claim finishing positions for seasons marked complete, or where a player's specific place is recorded; for partial/winner_only seasons cite only the recorded winner and recorded places.",
-      "Early seasons may have been imported as aggregated single-summary rounds, so per-round granularity for those years is coarse.",
+      "Detailed round-by-round data begins in 2023. Pre-2023 seasons (2020–2022) existed only as season-aggregate points totals and are EXCLUDED from all round-level stats here (career, streaks, recent form, signature/regular buckets, head-to-head). Those years are represented only in points_champion_history.",
       "Retired players are excluded from selection.",
     ],
     cup_championship_history,

@@ -62,12 +62,12 @@ serve(async (req) => {
   }
 
   // Fetch all rounds (paginated)
-  type Round = { id: string; season_id: string | null; round_date: string; is_signature_event: number };
+  type Round = { id: string; season_id: string | null; round_date: string; is_signature_event: number; row_type: string };
   const allRounds: Round[] = [];
   let offset = 0;
   const PAGE = 1000;
   while (true) {
-    let q = supabase.from("league_rounds").select("id, season_id, round_date, is_signature_event")
+    let q = supabase.from("league_rounds").select("id, season_id, round_date, is_signature_event, row_type")
       .eq("group_id", groupId).order("round_date").range(offset, offset + PAGE - 1);
     if (seasonId) q = q.eq("season_id", seasonId);
     const { data } = await q;
@@ -79,6 +79,10 @@ serve(async (req) => {
 
   // Filter rounds
   const rounds = allRounds.filter((r) => {
+    // Pre-2023 season_aggregate rows (migration 035) are not real rounds and
+    // must never enter a round-level points comparison. Previously excluded via
+    // is_signature_event=1; that flag is now cleared, so gate on row_type.
+    if (r.row_type === "season_aggregate") return false;
     if (!seasonId && (!r.season_id || !allowedSeasonIds.has(r.season_id))) return false;
     if (excludeSig && r.is_signature_event) return false;
     return true;

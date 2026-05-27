@@ -79,13 +79,13 @@ serve(async (req) => {
   );
 
   // Fetch all rounds for this group (handle Supabase default row limit)
-  let allRoundRows: { id: string; season_id: string | null; round_date: string; is_signature_event: number }[] = [];
+  let allRoundRows: { id: string; season_id: string | null; round_date: string; is_signature_event: number; row_type: string }[] = [];
   let offset = 0;
   const PAGE = 1000;
   while (true) {
     let q = supabase
       .from("league_rounds")
-      .select("id, season_id, round_date, is_signature_event")
+      .select("id, season_id, round_date, is_signature_event, row_type")
       .eq("group_id", groupId)
       .order("round_date")
       .range(offset, offset + PAGE - 1);
@@ -99,8 +99,11 @@ serve(async (req) => {
     if (rows.length < PAGE) break;
     offset += PAGE;
   }
-  // Filter: 2023+ seasons (unless specific season requested) and signature events
+  // Filter: drop pre-2023 season_aggregate rows (migration 035 — not real
+  // rounds; previously excluded via is_signature_event=1, now cleared), then
+  // 2023+ seasons (unless specific season requested) and signature events.
   const rounds = allRoundRows.filter((r) => {
+    if (r.row_type === "season_aggregate") return false;
     if (!seasonId && (!r.season_id || !allowedSeasonIds.has(r.season_id))) return false;
     if (excludeSig && r.is_signature_event) return false;
     return true;
@@ -125,7 +128,7 @@ serve(async (req) => {
   }
 
   // Group scores by round, keep only rounds where BOTH players have a score
-  const roundMap = new Map<string, { id: string; season_id: string | null; round_date: string; is_signature_event: number }>();
+  const roundMap = new Map<string, { id: string; season_id: string | null; round_date: string; is_signature_event: number; row_type: string }>();
   for (const r of rounds) {
     roundMap.set(r.id, r);
   }
