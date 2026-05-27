@@ -5,7 +5,7 @@
 // migration 014). 401 if no/invalid JWT, 403 if not a member.
 //
 // Computes a GROUP-SCOPED stats payload for the selected spotlight players
-// (career, current-season, recent form, streaks, signature events,
+// (career, current-season, recent form, streaks, regular events, tournaments,
 // championship history, and head-to-head among the spotlight players only),
 // then runs a three-stage pipeline:
 //   1. Claude generates the broadcast notes + a structured `claims` list.
@@ -70,15 +70,17 @@ Rules:
 - Every claim must be grounded in a specific number from the data. Don't invent stats. If a stat isn't there, don't say it.
 - Prefer head-to-head records, streaks, championship history, and recent form over generic season totals.
 - Tone: confident, punchy, broadcast-style. Hyperbole is fine when the data backs it.
-- Surface tension: rivalries (close H2H), dominance (lopsided H2H), comebacks, choking history (poor signature-event from strong regular-season players), championship pedigree.
+- Surface tension: rivalries (close H2H), dominance (lopsided H2H), comebacks, choking history (poor tournament finishes from strong regular-season players), championship pedigree.
 - Game points data is mostly NULL pre-2026 — do NOT cite career total_game_points. Use total_score_value, head-to-head records, and championship/streak data instead.
-- Cup Championship finishing history is a primary commentary category, alongside head-to-head records, tournament performance (signature events AND regular events), and points standings.
-- Tournament performance is split into signature events and regular events. Cover both in parallel — a player's signature-event record and their regular-event record are equally worth discussing; don't default to signature events as more important. A player can dominate regular events but struggle in signature events (or vice versa), and that contrast is itself a storyline. Treat money won and money lost symmetrically across both buckets.
-- Head-to-head records are split between signature events and regular events. Players may dominate an opponent in one bucket and lose to them in the other — cover both when discussing rivalries; a 5-3 signature edge alongside a 50-52 regular edge tells a richer story than a combined record would.
+- Cup Championship finishing history is a primary commentary category, alongside head-to-head records, regular round play, tournament play, and points standings.
+- Detailed round-by-round records begin in 2023. Pre-2023 data is limited to points championship finishing positions per season — no per-round results, no regular/tournament bucketing, no per-round head-to-head outcomes. When discussing player history that spans the 2020–2022 era, refer to points championship results only, and acknowledge the data boundary naturally when a player's career predates 2023 (for example: "Detailed records start in 2023, but FJ's points championship pedigree goes back to 2020"). Weave this in naturally — never as a disclaimer block.
+- Cover both regular round play and tournament play. Regular rounds are everyday head-to-head differential matches with no buy-in — wins and losses settle directly between players. Tournament rounds (is_tournament = 1) are formal pot-based competitions: players buy in, winners receive payouts from the pot, and score_value represents the net result (payout minus buy-in). These are distinct competition formats and a player's record in each tells a different story. You can mention buy-in scale, payout magnitude, and competition depth; a tournament win means finishing in the money, a tournament loss means paying the buy-in without recovering it. Treat money won and money lost symmetrically.
+- Head-to-head records are split between regular events and tournaments. A player can dominate an opponent in regular rounds but go cold against them in tournaments (or vice versa) — cover both dimensions when relevant; they often tell different stories about the same rivalry.
+- Avoid any reference to "signature events" or "signature rounds". That category previously existed but has been retired; the data now lives under the tournaments bucket or as regular rounds depending on the actual round shape.
 - Cup data completeness: make finishing-position claims only for seasons whose data_completeness is "complete", or where a player's specific place is recorded for that season. For "partial" or "winner_only" seasons, cite only the recorded winner and any recorded places — never infer unrecorded positions. If a player's Cup results have gaps, acknowledge the gap honestly rather than guessing.
 - No emojis. No markdown headers. Use **bold** only for storyline headlines when format calls for it.`;
 
-type RoundRow = { id: string; season_id: string | null; round_date: string; is_signature_event: number };
+type RoundRow = { id: string; season_id: string | null; round_date: string; row_type: string; is_tournament: number };
 type ScoreRow = { league_round_id: string; player_id: string; score_value: number | null; score_override: number | null; game_points: number | null };
 type SeasonRow = { id: string; start_date: string; end_date: string; cup_champion_player_id: string | null };
 
@@ -192,13 +194,17 @@ serve(async (req) => {
     while (true) {
       const { data: page, error } = await caller
         .from("league_rounds")
-        .select("id, season_id, round_date, is_signature_event")
+        .select("id, season_id, round_date, row_type, is_tournament")
         .eq("group_id", groupId)
         .order("round_date")
         .range(offset, offset + PAGE - 1);
       if (error) return json({ error: "Failed to fetch rounds", details: error.message }, 500);
       const rows = (page ?? []) as RoundRow[];
-      groupRounds.push(...rows);
+      // Exclude pre-2023 season_aggregate rows (migration 035): they are not
+      // real rounds, so they must not enter ANY round-level stat (career,
+      // streaks, recent form, regular/tournament buckets, or head-to-head).
+      // Pre-2023 points history is preserved separately via season_standings.
+      groupRounds.push(...rows.filter((r) => r.row_type !== "season_aggregate"));
       if (rows.length < PAGE) break;
       offset += PAGE;
     }
@@ -224,8 +230,11 @@ serve(async (req) => {
     }
   }
 
-  // Per-player chronological round list (group-scoped).
-  type PR = { rid: string; d: string; sid: string | null; sig: boolean; v: number; gp: number | null };
+  // Per-player chronological round list (group-scoped). byPlayer excludes
+  // season_aggregate rows (filtered at fetch), so every entry is a regular_round;
+  // `tourney` splits the pot-based tournament rounds (is_tournament = 1) from
+  // everyday head-to-head rounds.
+  type PR = { rid: string; d: string; sid: string | null; tourney: boolean; v: number; gp: number | null };
   const byPlayer = new Map<string, PR[]>();
   for (const id of playerIds) byPlayer.set(id, []);
   for (const s of scores) {
@@ -233,7 +242,7 @@ serve(async (req) => {
     if (!r) continue;
     byPlayer.get(s.player_id)!.push({
       rid: r.id, d: r.round_date, sid: r.season_id,
-      sig: r.is_signature_event === 1, v: eff(s), gp: s.game_points,
+      tourney: r.is_tournament === 1, v: eff(s), gp: s.game_points,
     });
   }
   for (const arr of byPlayer.values()) {
@@ -416,7 +425,7 @@ serve(async (req) => {
     });
   }
 
-  // Per-bucket tournament stats (signature vs regular), identical shape so both
+  // Per-bucket stats (regular events vs tournaments), identical shape so both
   // buckets get equal-weight coverage. money_won/money_lost split the signed
   // effective score (r.v): positive rows = money won, negative rows = money lost.
   const bucketStats = (rows: PR[]) => {
@@ -482,35 +491,36 @@ serve(async (req) => {
       player.career = { total_rounds: 0, total_score_value: 0, biggest_single_round_swing: 0 };
     }
 
-    // Tournament performance, split into two parallel buckets with the SAME
-    // shape (incl. a won/lost money split) so regular events carry equal weight
-    // with signature events. bucketStats handles the empty-bucket case (total 0).
-    player.signature_events = bucketStats(rs.filter((r) => r.sig));
-    player.regular_events = bucketStats(rs.filter((r) => !r.sig));
+    // Two parallel buckets with the SAME shape (incl. a won/lost money split):
+    // regular_events = everyday head-to-head rounds (is_tournament = 0),
+    // tournaments = pot-based tournament rounds (is_tournament = 1). Both are
+    // regular_round rows; the signature_events bucket is retired (no such rows).
+    // bucketStats handles the empty-bucket case (total 0).
+    player.regular_events = bucketStats(rs.filter((r) => !r.tourney));
+    player.tournaments = bucketStats(rs.filter((r) => r.tourney));
 
     player.championships = { cup_wins: cupWins(id), points_champion_wins: pointsWins(id) };
     player.cup_championship_history = cupHistoryFor(id);
 
     // Head-to-head: ONLY among the other spotlight players in this request,
-    // split into signature vs regular buckets. A shared round has one
-    // is_signature flag, so orow.sig classifies it for both players. The
-    // combined record is intentionally dropped (buckets tell separate stories).
+    // split into regular vs tournament buckets. A shared round has one
+    // is_tournament flag, so orow.tourney classifies it for both players.
     const myByRid = new Map(rs.map((r) => [r.rid, r.v]));
     const h2h: unknown[] = [];
     for (const oid of playerIds) {
       if (oid === id) continue;
       const mk = () => ({ rounds_together: 0, wins: 0, losses: 0, ties: 0, score_value_delta: 0 });
-      const sigB = mk(), regB = mk();
+      const regB = mk(), tourB = mk();
       for (const orow of byPlayer.get(oid)!) {
         if (!myByRid.has(orow.rid)) continue;
         const me = myByRid.get(orow.rid)!;
-        const b = orow.sig ? sigB : regB;
+        const b = orow.tourney ? tourB : regB;
         b.rounds_together++;
         b.score_value_delta += me - orow.v;
         if (me > orow.v) b.wins++; else if (me < orow.v) b.losses++; else b.ties++;
       }
-      if (sigB.rounds_together + regB.rounds_together > 0) {
-        h2h.push({ opponent: nm(oid), signature_events: sigB, regular_events: regB });
+      if (regB.rounds_together + tourB.rounds_together > 0) {
+        h2h.push({ opponent: nm(oid), regular_events: regB, tournaments: tourB });
       }
     }
     player.head_to_head = h2h;
@@ -536,7 +546,7 @@ serve(async (req) => {
     data_caveats: [
       "game_points is NULL for most pre-2026 imported rounds; career/season game_points are partial sums over rounds where it was recorded — do not cite career total_game_points.",
       "Cup Championship finishing order is recorded in championship_results but is incomplete for older seasons — see group_context.championships_played[].data_completeness (complete | partial | winner_only) and each spotlight player's cup_championship_history. Only claim finishing positions for seasons marked complete, or where a player's specific place is recorded; for partial/winner_only seasons cite only the recorded winner and recorded places.",
-      "Early seasons may have been imported as aggregated single-summary rounds, so per-round granularity for those years is coarse.",
+      "Detailed round-by-round data begins in 2023. Pre-2023 seasons (2020–2022) existed only as season-aggregate points totals and are EXCLUDED from all round-level stats here (career, streaks, recent form, regular/tournament buckets, head-to-head). Those years are represented only in points_champion_history.",
       "Retired players are excluded from selection.",
     ],
     cup_championship_history,
