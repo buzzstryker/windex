@@ -86,6 +86,7 @@ export default function StandingsScreen() {
     reload,
     dataVersion,
     myPlayerIds,
+    isSelectedSeasonActive,
   } = useGroup();
 
   // Log view_leaderboard on initial mount and whenever the selected group
@@ -191,6 +192,18 @@ export default function StandingsScreen() {
       ? `${seasonLabel(selectedSeason)} Standings`
       : 'Standings';
 
+  // Cup Champion indicator. Show a trophy on the champion's standings row, but
+  // ONLY for a completed past season (end_date < today, i.e. not active) that
+  // has a recorded champion. Active/current season, All Time, and seasons with
+  // no recorded champion render no icon. Display-only — does NOT affect the
+  // points-descending sort or row position. Source is seasons.cup_champion_player_id
+  // (migration 025), already on the Season object via listSeasons — the same
+  // source the GroupDetail "Previous Seasons" card uses. Matched to a standings
+  // row by player_id; if no row matches (e.g. champion played zero rounds or is
+  // no longer an active member, so season_standings omits them), no icon renders.
+  const seasonCompleted = !isAllTime && !!selectedSeason && !isSelectedSeasonActive;
+  const championPlayerId = seasonCompleted ? (selectedSeason?.cup_champion_player_id ?? null) : null;
+
   const renderRow = ({ item, index }: { item: StandingRow; index: number }) => {
     const pts = Math.round(item.total_points);
     const pointsStr = formatPoints(item.total_points, isAllTime ? null : selectedGroup?.dollars_per_point);
@@ -199,6 +212,7 @@ export default function StandingsScreen() {
       ? (colorScheme === 'dark' ? '#1C1C1E' : '#FFFFFF')
       : (colorScheme === 'dark' ? '#222224' : '#FAFAFA');
 
+    const isChampion = !!championPlayerId && item.player_id === championPlayerId;
     const canOpenPlayer = !isAllTime && !!selectedSeason && !!selectedGroup;
     const handlePress = () => {
       if (!canOpenPlayer) return;
@@ -235,8 +249,13 @@ export default function StandingsScreen() {
           style={styles.fullNameCol}
           numberOfLines={1}
           ellipsizeMode="tail"
+          accessibilityLabel={
+            isChampion
+              ? `${formatInitialLastName(item.full_name)}, Cup Champion`
+              : undefined
+          }
         >
-          {formatInitialLastName(item.full_name)}
+          {isChampion ? '🏆 ' : ''}{formatInitialLastName(item.full_name)}
         </ThemedText>
         <View style={styles.wltCol}>
           <Text style={[styles.wltNum, { color: colors.positive }]}>{item.wins}</Text>
