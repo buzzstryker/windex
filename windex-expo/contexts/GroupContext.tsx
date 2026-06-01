@@ -22,6 +22,11 @@ type GroupContextValue = {
   myGroups: GroupWithSection[];
   sections: Section[];
   selectedGroup: GroupWithSection | null;
+  /** True when the current user is an active member of the selected group.
+   *  Consumers use this to gate write affordances (e.g. Add Round) to match
+   *  the league_rounds/league_scores INSERT RLS, which requires
+   *  am_i_group_member(group_id). Viewing is open to everyone. */
+  selectedGroupIsMine: boolean;
   selectedSeason: Season | null;
   seasons: Season[];
   selectGroup: (group: GroupWithSection) => void;
@@ -260,15 +265,13 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
 
     let chosen: GroupWithSection | undefined;
 
-    // 1. Persisted manual selection
+    // 1. Persisted manual selection — validated against ALL groups, not just
+    //    memberships. Viewing any group is now permitted, so a non-member's
+    //    saved pick (e.g. Chris → YC Windex) must survive reload rather than
+    //    being discarded back to a membership.
     if (persistedChoiceId) {
       const candidate = groups.find((g) => g.id === persistedChoiceId);
-      if (
-        candidate &&
-        (myMembershipJoinedAt.has(candidate.id) || myMembershipJoinedAt.size === 0)
-      ) {
-        chosen = candidate;
-      }
+      if (candidate) chosen = candidate;
     }
 
     // 2. Most-recently-joined of myGroups
@@ -345,6 +348,11 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
     setSelectedSeason(season);
   }, []);
 
+  // Is the current user an active member of the selected group? Mirrors the
+  // am_i_group_member(group_id) predicate that gates league_rounds/
+  // league_scores INSERT RLS. Drives write-affordance visibility in consumers.
+  const selectedGroupIsMine = selectedGroup ? myMembershipJoinedAt.has(selectedGroup.id) : false;
+
   // Combined loading state for consumers. True until everything that affects
   // which group should be shown is settled. Components show a spinner instead
   // of rendering with a wrong-group flash followed by correction.
@@ -361,6 +369,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
         myGroups,
         sections,
         selectedGroup,
+        selectedGroupIsMine,
         selectedSeason,
         seasons,
         selectGroup,

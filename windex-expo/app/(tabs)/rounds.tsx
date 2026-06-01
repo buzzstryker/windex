@@ -36,7 +36,7 @@ export default function RoundsScreen() {
   const router = useRouter();
   const { openDrawer } = useDrawer();
 
-  const { selectedGroup, selectedSeason, seasonLabel, reload, dataVersion, invalidateData, isSelectedSeasonActive, isSuperAdmin, isGroupAdmin, myPlayerIds } = useGroup();
+  const { selectedGroup, selectedGroupIsMine, selectedSeason, seasonLabel, reload, dataVersion, invalidateData, isSelectedSeasonActive, isSuperAdmin, isGroupAdmin, myPlayerIds } = useGroup();
 
   // Log view_rounds_list on initial mount and whenever the selected group
   // or season changes. Read myPlayerIds via a ref so the effect doesn't
@@ -53,8 +53,14 @@ export default function RoundsScreen() {
     }
   }, [selectedGroup?.id, selectedSeason?.id]);
 
-  // Members can only add rounds to active seasons; admins can backfill past seasons
-  const canAddRound = isSelectedSeasonActive || isSuperAdmin || (selectedGroup ? isGroupAdmin(selectedGroup.id) : false);
+  // Add Round inserts into league_rounds + league_scores, whose INSERT RLS
+  // requires am_i_group_member(group_id) — no super-admin/group-admin bypass.
+  // So the affordance is hidden entirely when viewing a group the user isn't a
+  // member of. For members, the existing rule still applies: active season for
+  // everyone, plus past-season backfill for super-admins / group-admins.
+  const canAddRound =
+    selectedGroupIsMine &&
+    (isSelectedSeasonActive || isSuperAdmin || (selectedGroup ? isGroupAdmin(selectedGroup.id) : false));
 
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [roundScores, setRoundScores] = useState<RoundScores>({});

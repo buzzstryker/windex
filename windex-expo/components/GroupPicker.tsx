@@ -46,13 +46,13 @@ export function GroupPicker({ tabName }: Props) {
   const colors = Colors[colorScheme];
   const headerText = colors.headerText;
   const insets = useSafeAreaInsets();
-  const { myGroups, selectedGroup, selectGroup } = useGroup();
+  const { groups, myGroups, selectedGroup, selectGroup } = useGroup();
   const [pickerVisible, setPickerVisible] = useState(false);
 
   const isPhone = width < PHONE_BREAKPOINT_PX;
 
-  // Desktop, or no membership signal yet — render just the tab name centered.
-  if (!isPhone || myGroups.length === 0) {
+  // Desktop, or no groups loaded yet — render just the tab name centered.
+  if (!isPhone || groups.length === 0) {
     return (
       <Text style={[styles.tabName, { color: headerText }]} numberOfLines={1}>
         {tabName}
@@ -60,10 +60,11 @@ export function GroupPicker({ tabName }: Props) {
     );
   }
 
-  const groupName = selectedGroup?.name ?? myGroups[0].name;
+  const groupName = selectedGroup?.name ?? groups[0]?.name ?? '';
 
-  // Single membership — render "Tab · Group" as static text, no affordance.
-  if (myGroups.length === 1) {
+  // Only one group exists org-wide — render "Tab · Group" as static text, no
+  // affordance (there's nothing to switch to).
+  if (groups.length === 1) {
     return (
       <View style={styles.row}>
         <Text style={[styles.tabName, { color: headerText }]} numberOfLines={1}>
@@ -85,7 +86,28 @@ export function GroupPicker({ tabName }: Props) {
     setPickerVisible(false);
   };
 
-  // Multi-membership — full pressable: "Tab ▾ Group".
+  // Build a sectioned list: "My Groups" (active memberships) then "Other
+  // Groups" (every other group — viewable but not a membership). Mirrors the
+  // Drawer's split. A non-member sees only "Other Groups".
+  const myGroupIds = new Set(myGroups.map((g) => g.id));
+  const otherGroups = groups
+    .filter((g) => !myGroupIds.has(g.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  type PickerRow =
+    | { kind: 'header'; title: string }
+    | { kind: 'group'; group: GroupWithSection };
+  const rows: PickerRow[] = [];
+  if (myGroups.length > 0) {
+    rows.push({ kind: 'header', title: 'My Groups' });
+    for (const g of myGroups) rows.push({ kind: 'group', group: g });
+  }
+  if (otherGroups.length > 0) {
+    rows.push({ kind: 'header', title: 'Other Groups' });
+    for (const g of otherGroups) rows.push({ kind: 'group', group: g });
+  }
+
+  // More than one group to view — full pressable: "Tab ▾ Group".
   return (
     <>
       <Pressable
@@ -118,17 +140,23 @@ export function GroupPicker({ tabName }: Props) {
               </Pressable>
             </View>
             <FlatList
-              data={myGroups}
-              keyExtractor={(g) => g.id}
+              data={rows}
+              keyExtractor={(item) =>
+                item.kind === 'header' ? `h-${item.title}` : `g-${item.group.id}`
+              }
               renderItem={({ item }) => {
-                const isSel = selectedGroup?.id === item.id;
+                if (item.kind === 'header') {
+                  return <Text style={styles.sectionHeader}>{item.title}</Text>;
+                }
+                const g = item.group;
+                const isSel = selectedGroup?.id === g.id;
                 return (
                   <Pressable
                     style={[styles.modalRow, isSel && styles.modalRowSelected]}
-                    onPress={() => handleSelect(item)}
+                    onPress={() => handleSelect(g)}
                   >
                     <Text style={[styles.modalRowName, isSel && { color: OLIVE }]} numberOfLines={1}>
-                      {item.name}
+                      {g.name}
                     </Text>
                     {isSel ? <Text style={styles.checkmark}>{'✓'}</Text> : null}
                   </Pressable>
@@ -213,6 +241,16 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#8E8E93',
     padding: 4,
+  },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 12,
+    marginBottom: 4,
+    marginLeft: 8,
   },
   modalRow: {
     flexDirection: 'row',

@@ -28,21 +28,22 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { groups, myGroups, selectedGroup, selectGroup, isSuperAdmin } = useGroup();
+  const { groups, myGroups, selectedGroup, selectGroup } = useGroup();
 
   const sheetBg = colorScheme === 'dark' ? colors.card : '#FFFFFF';
   const textColor = colors.text;
   const mutedColor = colors.icon;
 
   // Single source of truth: myGroups comes from GroupContext (active group_members
-  // rows for the current user, alphabetical). The phone GroupPicker uses the same
-  // list, so picker and drawer stay in sync.
-  // Super admins additionally see "Other Groups" — every group they're not a
-  // member of — so they can still browse the org from the drawer.
+  // rows for the current user). The phone GroupPicker uses the same split, so
+  // picker and drawer stay in sync.
+  // Every user sees "Other Groups" — every group they're not a member of — so
+  // anyone can browse and switch into another group to VIEW it. (Viewing is
+  // open per RLS; write affordances stay gated to members of the selected group.)
   const myGroupIds = new Set(myGroups.map((g) => g.id));
-  const otherGroups: GroupWithSection[] = isSuperAdmin
-    ? [...groups].filter((g) => !myGroupIds.has(g.id)).sort((a, b) => a.name.localeCompare(b.name))
-    : [];
+  const otherGroups: GroupWithSection[] = [...groups]
+    .filter((g) => !myGroupIds.has(g.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const handleGroupSelect = (g: GroupWithSection) => {
     selectGroup(g);
@@ -94,8 +95,12 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
           {/* Scrollable content */}
           <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
             {/* My Groups */}
-            <Text style={[styles.sectionTitle, { color: mutedColor }]}>MY GROUPS</Text>
-            {myGroups.map((g) => renderGroupRow(g, selectedGroup?.id === g.id))}
+            {myGroups.length > 0 && (
+              <>
+                <Text style={[styles.sectionTitle, { color: mutedColor }]}>MY GROUPS</Text>
+                {myGroups.map((g) => renderGroupRow(g, selectedGroup?.id === g.id))}
+              </>
+            )}
 
             {/* Other Groups */}
             {otherGroups.length > 0 && (
