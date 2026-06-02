@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { DrawerProvider, useDrawer } from '@/contexts/DrawerContext';
 import { GroupProvider } from '@/contexts/GroupContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { registerServiceWorker } from '@/lib/pwaUpdate';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -74,6 +75,13 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  // Register the PWA service worker (web only) so installed apps auto-update
+  // to new deploys. BUILD_ID (the deploy SHA) makes each deploy's SW script
+  // URL unique, which is what triggers the browser to pick up the update.
+  useEffect(() => {
+    registerServiceWorker((process.env.EXPO_PUBLIC_BUILD_ID ?? '') || 'dev');
+  }, []);
+
   return (
     <AuthProvider>
       <DrawerProvider>

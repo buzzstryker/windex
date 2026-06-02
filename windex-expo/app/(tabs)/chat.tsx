@@ -21,6 +21,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getPlayerNames, getStoredAccessToken, type PlayerNames } from '@/lib/api';
 import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { setRealtimeAuth, supabaseRealtime } from '@/lib/supabase';
+import { setComposerBusy } from '@/lib/pwaUpdate';
 
 const ROOM_ID = 'global';
 const PAGE = 50;
@@ -147,6 +148,15 @@ export default function ChatScreen() {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inputFocused, setInputFocused] = useState(false);
+
+  // Tell the PWA updater the composer is "busy" (focused or holding unsent
+  // text) so a service-worker auto-reload is deferred until it's safe — never
+  // eating a half-typed message. Release on unmount (leaving the chat tab).
+  useEffect(() => {
+    setComposerBusy(inputFocused || text.trim().length > 0);
+  }, [inputFocused, text]);
+  useEffect(() => () => setComposerBusy(false), []);
 
   const channelRef = useRef<ReturnType<NonNullable<typeof supabaseRealtime>['channel']> | null>(null);
   const authorIdRef = useRef<string | null>(null); // deterministic single player id, cached for the session
@@ -431,6 +441,8 @@ export default function ChatScreen() {
               style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
               value={text}
               onChangeText={setText}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
               placeholder="Message"
               placeholderTextColor={colors.icon}
               multiline
