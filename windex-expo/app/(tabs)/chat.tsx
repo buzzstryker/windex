@@ -372,7 +372,13 @@ export default function ChatScreen() {
         <View
           style={[
             styles.composer,
-            { borderTopColor: colors.border, backgroundColor: colors.card, paddingBottom: insets.bottom || 8 },
+            {
+              borderTopColor: colors.border,
+              backgroundColor: colors.card,
+              paddingBottom: insets.bottom || 8,
+              paddingLeft: 12 + insets.left,
+              paddingRight: 12 + insets.right,
+            },
           ]}
         >
           <TextInput
@@ -420,6 +426,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    minWidth: 0, // allow the flex item to shrink below content width (web <textarea> intrinsic min-width)
     maxHeight: 120,
     minHeight: 40,
     borderWidth: StyleSheet.hairlineWidth,
@@ -429,6 +436,6 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     fontSize: 15,
   },
-  send: { borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
+  send: { flexShrink: 0, borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
   sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
 });
