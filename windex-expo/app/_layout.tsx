@@ -75,6 +75,7 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  // auto-update test 2026-06-01
   // Register the PWA service worker (web only) so installed apps auto-update
   // to new deploys. BUILD_ID (the deploy SHA) makes each deploy's SW script
   // URL unique, which is what triggers the browser to pick up the update.
