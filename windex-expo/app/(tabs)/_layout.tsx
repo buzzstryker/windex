@@ -6,6 +6,15 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
+// Pin the tab navigator's default focused tab to Standings. Without this the
+// initial tab was left to expo-router's implicit route resolution, which
+// adding the Chat screen perturbed — landing users on Chat. The index redirect
+// and the post-login replace already point at Standings; this makes the
+// navigator itself agree, deterministically.
+export const unstable_settings = {
+  initialRouteName: 'standings',
+};
+
 export default function TabLayout() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
