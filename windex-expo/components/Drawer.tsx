@@ -9,6 +9,12 @@ import type { Group } from '@/lib/api';
 
 const OLIVE = '#4B5E2A';
 
+// Build identifier, injected at build time via EXPO_PUBLIC_BUILD_ID
+// (= VERCEL_GIT_COMMIT_SHA on Vercel). Trimmed to a short SHA for display;
+// 'dev' for local builds where the env var is unset. Lets us confirm at a
+// glance which bundle an installed PWA is actually running.
+const BUILD_ID = (process.env.EXPO_PUBLIC_BUILD_ID ?? '').slice(0, 7) || 'dev';
+
 type GroupWithSection = Group & { sectionName?: string };
 
 type DrawerProps = {
@@ -129,6 +135,7 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
             <View style={[styles.separator, { backgroundColor: colors.border, marginBottom: 12 }]} />
             <Text style={[styles.userName, { color: textColor }]}>{userName || 'Player'}</Text>
             <Text style={[styles.userEmail, { color: mutedColor }]}>{userEmail || ''}</Text>
+            <Text style={[styles.buildId, { color: mutedColor }]}>build {BUILD_ID}</Text>
           </View>
         </View>
       </View>
@@ -164,4 +171,5 @@ const styles = StyleSheet.create({
   userSection: {},
   userName: { fontSize: 15, fontWeight: '600' },
   userEmail: { fontSize: 13, marginTop: 2 },
+  buildId: { fontSize: 11, marginTop: 6, opacity: 0.7 },
 });
