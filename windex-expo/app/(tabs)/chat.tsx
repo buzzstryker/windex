@@ -132,9 +132,56 @@ function useStandaloneKeyboardInset(): number {
   return inset;
 }
 
+// ── TEMP DEBUG (remove in Step 3) ──────────────────────────────────────────
+// Live visualViewport / window snapshot so we can READ real device values
+// while typing in the installed PWA instead of guessing about the off-left bug.
+type VVDebug = {
+  vvW: number; vvH: number; offL: number; offT: number;
+  pageL: number; pageT: number; innerW: number; innerH: number;
+  standalone: boolean;
+};
+function useViewportDebug(): VVDebug | null {
+  const [d, setD] = useState<VVDebug | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const nav = navigator as Navigator & { standalone?: boolean };
+    const standalone =
+      nav.standalone === true ||
+      (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(display-mode: standalone)').matches);
+    const update = () => {
+      setD({
+        vvW: Math.round(vv.width),
+        vvH: Math.round(vv.height),
+        offL: Math.round(vv.offsetLeft),
+        offT: Math.round(vv.offsetTop),
+        pageL: Math.round(vv.pageLeft),
+        pageT: Math.round(vv.pageTop),
+        innerW: window.innerWidth,
+        innerH: window.innerHeight,
+        standalone,
+      });
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    window.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      window.removeEventListener('scroll', update);
+    };
+  }, []);
+  return d;
+}
+// ── END TEMP DEBUG ─────────────────────────────────────────────────────────
+
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const kbInset = useStandaloneKeyboardInset();
+  const vvDebug = useViewportDebug(); // TEMP DEBUG (remove in Step 3)
   const colors = Colors[useColorScheme() ?? 'light'];
   const { openDrawer } = useDrawer();
 
@@ -370,6 +417,16 @@ export default function ChatScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <Header title="Chat" onMenuPress={openDrawer} />
+      {/* ── TEMP DEBUG overlay (remove in Step 3) ── */}
+      {vvDebug ? (
+        <View style={[styles.debugOverlay, { top: insets.top + 60 }]} pointerEvents="none">
+          <Text style={styles.debugText}>standalone: {String(vvDebug.standalone)}</Text>
+          <Text style={styles.debugText}>vv {vvDebug.vvW}×{vvDebug.vvH}  offL {vvDebug.offL}  offT {vvDebug.offT}</Text>
+          <Text style={styles.debugText}>pageL {vvDebug.pageL}  pageT {vvDebug.pageT}</Text>
+          <Text style={styles.debugText}>win {vvDebug.innerW}×{vvDebug.innerH}</Text>
+          <Text style={styles.debugText}>applied paddingBottom: {kbInset}</Text>
+        </View>
+      ) : null}
       {/* KeyboardAvoidingView is a native component that misbehaves on web:
           in a standalone iOS PWA the keyboard-dismiss event doesn't fire
           reliably, so its bottom padding never resets after send and the
@@ -455,6 +512,17 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
+  // TEMP DEBUG (remove in Step 3)
+  debugOverlay: {
+    position: 'absolute',
+    left: 8,
+    zIndex: 9999,
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  debugText: { color: '#3DFF6E', fontSize: 11, lineHeight: 15, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40, transform: [{ scaleY: -1 }] },
   listContent: { paddingHorizontal: 16, paddingVertical: 12 },
   row: { marginVertical: 6 },
