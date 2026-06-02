@@ -555,7 +555,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 10,
-    fontSize: 15,
+    fontSize: 16, // >=16px: iOS auto-zooms on focusing an input under 16px; that
+                  // zoom (not any offset math) is what shoved the composer off-screen.
   },
   send: { flexShrink: 0, borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
   sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
