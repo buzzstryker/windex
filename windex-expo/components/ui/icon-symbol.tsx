@@ -18,6 +18,7 @@ const MAPPING = {
   'info.circle.fill': 'info',
   'trophy.fill': 'emoji-events',
   'paperplane.fill': 'send',
+  'message.fill': 'chat-bubble',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
   'calendar': 'event',

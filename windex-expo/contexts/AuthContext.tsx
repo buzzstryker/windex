@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { getSupabaseAnonKey, getSupabaseUrl, hasSupabaseAuthConfig } from '@/lib/config';
 import { setAccessTokenGetter, setOnUnauthorized } from '@/lib/api';
 import { authPersistence } from '@/lib/authPersistence';
+import { setRealtimeAuth } from '@/lib/supabase';
 
 type AuthContextValue = {
   ready: boolean;
@@ -58,6 +59,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         (_event, session) => {
           if (cancelled) return;
+          // Keep the realtime socket's JWT in lockstep with the session.
+          // Fires on INITIAL_SESSION / SIGNED_IN / TOKEN_REFRESHED / SIGNED_OUT,
+          // so the chat channel never goes deaf after a token refresh.
+          setRealtimeAuth(session?.access_token ?? null);
           const hasToken = Boolean(session?.access_token);
           setSignedIn(hasToken);
           setUserId(session?.user?.id ?? null);

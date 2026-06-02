@@ -44,6 +44,13 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="info.circle.fill" color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: 'Chat',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="message.fill" color={color} />,
+        }}
+      />
 
       {/* Hidden tabs — still routable but not shown in the tab bar */}
       <Tabs.Screen name="index" options={{ href: null }} />
