@@ -95,8 +95,46 @@ function mergeDesc(existing: Message[], incoming: Message[]): Message[] {
   );
 }
 
+/**
+ * Keyboard inset for installed iOS PWAs. A Safari tab resizes the viewport
+ * (and scrolls the input into view) when the keyboard opens, so the browser
+ * "just works". A standalone home-screen PWA instead OVERLAYS the keyboard
+ * without resizing the layout viewport, and react-native-web's
+ * KeyboardAvoidingView never reacts — leaving the composer mis-positioned and
+ * stale until a gesture forces a repaint. The visualViewport API still reports
+ * the keyboard in standalone mode, so we use it to compute the keyboard height
+ * and pad the content; on hide, visualViewport fires 'resize' and we reset
+ * (which also triggers the missing reflow). Scoped to standalone web only so
+ * the already-correct browser and native paths are untouched.
+ */
+function useStandaloneKeyboardInset(): number {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const nav = navigator as Navigator & { standalone?: boolean };
+    const isStandalone =
+      nav.standalone === true ||
+      (typeof window.matchMedia === 'function' &&
+        window.matchMedia('(display-mode: standalone)').matches);
+    const vv = window.visualViewport;
+    if (!isStandalone || !vv) return;
+    const update = () => {
+      setInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+  return inset;
+}
+
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
+  const kbInset = useStandaloneKeyboardInset();
   const colors = Colors[useColorScheme() ?? 'light'];
   const { openDrawer } = useDrawer();
 
@@ -339,7 +377,7 @@ export default function ChatScreen() {
           it on web (the browser's visual viewport already keeps the focused
           input above the keyboard) and keep it for the native app. */}
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={[styles.flex, { paddingBottom: kbInset }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 56}
         enabled={Platform.OS !== 'web'}
