@@ -47,17 +47,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="analysis"
-        options={{
-          title: 'Analysis',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="info.circle.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="chat"
         options={{
           title: 'Chat',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="message.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="analysis"
+        options={{
+          title: 'Analysis',
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="info.circle.fill" color={color} />,
         }}
       />
 
