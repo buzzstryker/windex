@@ -381,14 +381,16 @@ export default function ChatScreen() {
             },
           ]}
         >
-          <TextInput
-            style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
-            value={text}
-            onChangeText={setText}
-            placeholder="Message"
-            placeholderTextColor={colors.icon}
-            multiline
-          />
+          <View style={styles.inputWrap}>
+            <TextInput
+              style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
+              value={text}
+              onChangeText={setText}
+              placeholder="Message"
+              placeholderTextColor={colors.icon}
+              multiline
+            />
+          </View>
           <Pressable
             onPress={send}
             disabled={sending || text.trim().length === 0}
@@ -424,9 +426,15 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 8,
   },
-  input: {
+  // Flex-shrink lives on this wrapper View (RNW shrinks views reliably; a bare
+  // multiline TextInput renders as a <textarea> whose intrinsic min-width can
+  // refuse to shrink and push the Send button off-screen).
+  inputWrap: {
     flex: 1,
-    minWidth: 0, // allow the flex item to shrink below content width (web <textarea> intrinsic min-width)
+    minWidth: 0,
+  },
+  input: {
+    width: '100%',
     maxHeight: 120,
     minHeight: 40,
     borderWidth: StyleSheet.hairlineWidth,
