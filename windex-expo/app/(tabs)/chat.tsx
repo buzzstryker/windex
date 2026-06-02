@@ -332,10 +332,17 @@ export default function ChatScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <Header title="Chat" onMenuPress={openDrawer} />
+      {/* KeyboardAvoidingView is a native component that misbehaves on web:
+          in a standalone iOS PWA the keyboard-dismiss event doesn't fire
+          reliably, so its bottom padding never resets after send and the
+          layout stays stale until a touch gesture forces a reflow. Disable
+          it on web (the browser's visual viewport already keeps the focused
+          input above the keyboard) and keep it for the native app. */}
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={insets.top + 56}
+        enabled={Platform.OS !== 'web'}
       >
         {loading ? (
           <View style={styles.center}>
