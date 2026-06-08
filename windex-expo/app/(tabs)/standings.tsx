@@ -26,6 +26,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   ApiError,
   getStandings,
+  listEvents,
   type StandingRow,
 } from '@/lib/api';
 import { logUserEvent } from '@/lib/userEvents';
@@ -111,6 +112,28 @@ export default function StandingsScreen() {
   const [isAllTime, setIsAllTime] = useState(false);
   const [tab, setTab] = useState<'leaderboard' | 'history'>('leaderboard');
 
+  // Distinct rounds-played count for the season-selector pill. Sourced from
+  // listEvents (the SAME source the Rounds tab uses) for the selected
+  // season + group, so the pill count matches the Rounds tab exactly. We count
+  // returned EventSummary items — these are distinct round events and contain
+  // no season_aggregate rows (unlike a raw league_rounds query), so no row_type
+  // filter is needed. null = not yet loaded / N/A (All Time or no season): the
+  // pill shows the bare season label while in this state, never ": 0 Rounds".
+  const [seasonRoundCount, setSeasonRoundCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!selectedGroup || !selectedSeason || isAllTime) {
+      setSeasonRoundCount(null);
+      return;
+    }
+    let cancelled = false;
+    setSeasonRoundCount(null);
+    listEvents({ group_id: selectedGroup.id, season_id: selectedSeason.id })
+      .then((ev) => { if (!cancelled) setSeasonRoundCount(ev.length); })
+      .catch(() => { if (!cancelled) setSeasonRoundCount(null); });
+    return () => { cancelled = true; };
+  }, [selectedGroup?.id, selectedSeason?.id, isAllTime, dataVersion]);
+
   // Sort seasons newest first
   const sortedSeasons = [...seasons].sort((a, b) =>
     b.start_date.localeCompare(a.start_date),
@@ -121,6 +144,15 @@ export default function StandingsScreen() {
     : selectedSeason
       ? seasonLabel(selectedSeason)
       : 'Select Season';
+
+  // Pill label with rounds-played suffix. Only the active/displayed pill gets
+  // the suffix (not the picker options). Drop the suffix while the count is
+  // loading (null) or zero (legacy aggregate-only seasons) so we show the bare
+  // season label instead of ": 0 Rounds". Singular vs plural on N === 1.
+  const seasonPillLabel =
+    seasonRoundCount && seasonRoundCount > 0
+      ? `${currentDisplayLabel}: ${seasonRoundCount} ${seasonRoundCount === 1 ? 'Round' : 'Rounds'}`
+      : currentDisplayLabel;
 
   // Fetch standings — single season or all-time aggregate
   const fetchStandings = useCallback(async () => {
@@ -286,7 +318,7 @@ export default function StandingsScreen() {
         style={styles.seasonPickerBtn}
         onPress={() => setSeasonPickerVisible(true)}
       >
-        <Text style={styles.seasonPickerLabel}>{currentDisplayLabel}</Text>
+        <Text style={styles.seasonPickerLabel}>{seasonPillLabel}</Text>
         <Text style={styles.seasonPickerChevron}>{'\u25BE'}</Text>
       </Pressable>
 
