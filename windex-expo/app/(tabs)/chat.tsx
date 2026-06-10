@@ -29,6 +29,7 @@ import { setComposerBusy } from '@/lib/pwaUpdate';
 const ROOM_ID = 'global';
 const PAGE = 50;
 const OLIVE = '#4B5E2A';
+const REACTION_EMOJIS = ['👍', '😂', '🔥', '⛳', '💀'];
 
 type Message = {
   id: string;
@@ -42,6 +43,12 @@ type Message = {
 
 const MESSAGE_SELECT =
   'id,room_id,author_player_id,body,attachment_url,created_at,deleted_at';
+
+type Reaction = {
+  message_id: string;
+  player_id: string;
+  emoji: string;
+};
 
 function restBase(): string {
   return getApiBase().replace(/\/functions\/v1\/?$/, '');
@@ -135,6 +142,8 @@ export default function ChatScreen() {
   // `inverted`, so index 0 renders at the bottom → newest at bottom.
   const [messages, setMessages] = useState<Message[]>([]);
   const [names, setNames] = useState<Map<string, PlayerNames>>(new Map());
+  // Raw reaction rows keyed by message_id; aggregated per message at render.
+  const [reactions, setReactions] = useState<Map<string, Reaction[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [text, setText] = useState('');
@@ -183,6 +192,34 @@ export default function ChatScreen() {
     });
   }, [names]);
 
+  // Batch-fetch reactions for a set of message ids and replace those entries.
+  const loadReactions = useCallback(async (messageIds: string[]) => {
+    if (messageIds.length === 0) return;
+    const headers = await authHeaders();
+    if (!headers) return;
+    try {
+      const res = await fetch(
+        `${restBase()}/rest/v1/message_reactions?message_id=in.(${messageIds.join(',')})` +
+          `&select=message_id,player_id,emoji`,
+        { headers }
+      );
+      if (!res.ok) return;
+      const rows: Reaction[] = await res.json();
+      setReactions((prev) => {
+        const next = new Map(prev);
+        for (const id of messageIds) next.set(id, []);
+        for (const r of rows) {
+          const list = next.get(r.message_id);
+          if (list) list.push(r);
+          else next.set(r.message_id, [r]);
+        }
+        return next;
+      });
+    } catch {
+      /* non-fatal; realtime and the next load self-heal */
+    }
+  }, []);
+
   // Latest PAGE messages (initial load and gap-fill on resubscribe/foreground).
   const loadLatest = useCallback(async (mode: 'replace' | 'merge') => {
     const headers = await authHeaders();
@@ -202,13 +239,14 @@ export default function ChatScreen() {
         hasMoreRef.current = rows.length === PAGE;
       }
       void resolveNames(rows);
+      void loadReactions(rows.map((r) => r.id));
       setError(null);
     } catch {
       if (mode === 'replace') setError('Could not load messages.');
     } finally {
       setLoading(false);
     }
-  }, [resolveNames]);
+  }, [resolveNames, loadReactions]);
 
   // Older page: fetch PAGE messages created before the oldest we hold.
   const loadOlder = useCallback(async () => {
@@ -230,13 +268,14 @@ export default function ChatScreen() {
       setMessages((prev) => mergeDesc(prev, rows));
       hasMoreRef.current = rows.length === PAGE;
       void resolveNames(rows);
+      void loadReactions(rows.map((r) => r.id));
     } catch {
       /* leave hasMore as-is; user can scroll again to retry */
     } finally {
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [messages, resolveNames]);
+  }, [messages, resolveNames, loadReactions]);
 
   // Record the read watermark (upsert on the (player_id, room_id) PK) and
   // clear the tab dot. Failures are non-fatal; the next focus retries.
@@ -277,6 +316,68 @@ export default function ChatScreen() {
     setMessages((prev) => prev.map((m) => (m.id === row.id ? row : m)));
   }, []);
 
+  // Reaction add/remove — shared by realtime events and optimistic toggles.
+  // De-dupes by the (message_id, player_id, emoji) PK, so a realtime echo of
+  // our own optimistic write is a no-op.
+  const addReaction = useCallback((row: Reaction) => {
+    if (!row?.message_id) return;
+    setReactions((prev) => {
+      const list = prev.get(row.message_id) ?? [];
+      if (list.some((r) => r.player_id === row.player_id && r.emoji === row.emoji)) return prev;
+      const next = new Map(prev);
+      next.set(row.message_id, [...list, row]);
+      return next;
+    });
+  }, []);
+
+  const removeReaction = useCallback((row: Reaction) => {
+    if (!row?.message_id) return;
+    setReactions((prev) => {
+      const list = prev.get(row.message_id);
+      if (!list) return prev;
+      const filtered = list.filter(
+        (r) => !(r.player_id === row.player_id && r.emoji === row.emoji)
+      );
+      if (filtered.length === list.length) return prev;
+      const next = new Map(prev);
+      next.set(row.message_id, filtered);
+      return next;
+    });
+  }, []);
+
+  // Toggle own reaction: optimistic, revert on failure.
+  const toggleReaction = useCallback(
+    async (messageId: string, emoji: string, currentlyMine: boolean) => {
+      if (!myPlayerId) return;
+      const mine: Reaction = { message_id: messageId, player_id: myPlayerId, emoji };
+      if (currentlyMine) removeReaction(mine);
+      else addReaction(mine);
+      const headers = await authHeaders();
+      if (!headers) return;
+      try {
+        if (currentlyMine) {
+          const res = await fetch(
+            `${restBase()}/rest/v1/message_reactions?message_id=eq.${messageId}` +
+              `&player_id=eq.${myPlayerId}&emoji=eq.${encodeURIComponent(emoji)}`,
+            { method: 'DELETE', headers }
+          );
+          if (!res.ok) throw new Error(`${res.status}`);
+        } else {
+          const res = await fetch(`${restBase()}/rest/v1/message_reactions`, {
+            method: 'POST',
+            headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify(mine),
+          });
+          if (!res.ok) throw new Error(`${res.status}`);
+        }
+      } catch {
+        if (currentlyMine) addReaction(mine);
+        else removeReaction(mine);
+      }
+    },
+    [myPlayerId, addReaction, removeReaction]
+  );
+
   // Soft-delete own message: optimistic flip to [deleted], revert on failure.
   const deleteMessage = useCallback(async (msg: Message) => {
     closeSheet();
@@ -314,9 +415,21 @@ export default function ChatScreen() {
         { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${ROOM_ID}` },
         (payload) => onUpdate(payload.new as Message)
       )
+      // Reactions: unfiltered (table is chat-only; client matches by message
+      // id). DELETE payloads carry PK columns only — which is the whole row.
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'message_reactions' },
+        (payload) => addReaction(payload.new as Reaction)
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'message_reactions' },
+        (payload) => removeReaction(payload.old as Reaction)
+      )
       .subscribe();
     channelRef.current = channel;
-  }, [onInsert, onUpdate]);
+  }, [onInsert, onUpdate, addReaction, removeReaction]);
 
   const unsubscribe = useCallback(() => {
     if (supabaseRealtime && channelRef.current) {
@@ -415,6 +528,19 @@ export default function ChatScreen() {
       const older = messages[index + 1];
       const authorChanged = !older || older.author_player_id !== item.author_player_id;
       const showAuthor = !isMine && authorChanged;
+      // Aggregate raw reaction rows to per-emoji pills.
+      const rx = reactions.get(item.id);
+      const pills: { emoji: string; count: number; mine: boolean }[] = [];
+      if (rx && rx.length > 0) {
+        const byEmoji = new Map<string, { count: number; mine: boolean }>();
+        for (const r of rx) {
+          const agg = byEmoji.get(r.emoji) ?? { count: 0, mine: false };
+          agg.count += 1;
+          if (myPlayerId && r.player_id === myPlayerId) agg.mine = true;
+          byEmoji.set(r.emoji, agg);
+        }
+        byEmoji.forEach((v, emoji) => pills.push({ emoji, ...v }));
+      }
       return (
         <View
           style={[
@@ -452,11 +578,32 @@ export default function ChatScreen() {
               {item.deleted_at ? '[deleted]' : item.body}
             </Text>
           </Pressable>
+          {!item.deleted_at && pills.length > 0 ? (
+            <View style={styles.reactionRow}>
+              {pills.map((p) => (
+                <Pressable
+                  key={p.emoji}
+                  onPress={() => void toggleReaction(item.id, p.emoji, p.mine)}
+                  style={[
+                    styles.reactionPill,
+                    {
+                      backgroundColor: isDark ? colors.card : '#FFFFFF',
+                      borderColor: p.mine ? OLIVE : isDark ? colors.border : '#D0D0D0',
+                    },
+                  ]}
+                >
+                  <Text style={[styles.reactionPillText, p.mine && { color: OLIVE, fontWeight: '600' }]}>
+                    {p.emoji} {p.count}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           <Text style={[styles.time, { color: colors.icon }]}>{formatTime(item.created_at)}</Text>
         </View>
       );
     },
-    [names, colors, isDark, myPlayerId, messages]
+    [names, colors, isDark, myPlayerId, messages, reactions, toggleReaction]
   );
 
   return (
@@ -563,7 +710,27 @@ export default function ChatScreen() {
               </>
             ) : (
               <>
-                {/* Reaction emoji row slots here (next stage). */}
+                {sheetTarget && !sheetTarget.deleted_at ? (
+                  <View style={styles.sheetEmojiRow}>
+                    {REACTION_EMOJIS.map((e) => {
+                      const mine = (reactions.get(sheetTarget.id) ?? []).some(
+                        (r) => r.player_id === myPlayerId && r.emoji === e
+                      );
+                      return (
+                        <Pressable
+                          key={e}
+                          style={[styles.sheetEmojiBtn, mine && styles.sheetEmojiBtnMine]}
+                          onPress={() => {
+                            void toggleReaction(sheetTarget.id, e, mine);
+                            closeSheet();
+                          }}
+                        >
+                          <Text style={styles.sheetEmoji}>{e}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
                 {sheetTarget &&
                 !sheetTarget.deleted_at &&
                 myPlayerId != null &&
@@ -648,4 +815,24 @@ const styles = StyleSheet.create({
   sheetRow: { paddingVertical: 14, alignItems: 'center' },
   sheetRowText: { fontSize: 16, fontWeight: '500' },
   sheetDestructive: { fontSize: 16, fontWeight: '600', color: '#D32F2F' },
+
+  /* Reactions */
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2, maxWidth: '78%' },
+  reactionPill: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  reactionPillText: { fontSize: 12 },
+  sheetEmojiRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 10 },
+  sheetEmojiBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetEmojiBtnMine: { backgroundColor: 'rgba(75, 94, 42, 0.15)' },
+  sheetEmoji: { fontSize: 26 },
 });
