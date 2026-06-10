@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { Header } from '@/components/Header';
 import { GroupBanner } from '@/components/GroupBanner';
@@ -20,12 +21,16 @@ import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
 import { useDrawer } from '@/contexts/DrawerContext';
 import { useGroup } from '@/contexts/GroupContext';
+import { useRoundsUnread } from '@/contexts/RoundsUnreadContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   ApiError,
+  getStoredAccessToken,
   listEvents,
   type EventSummary,
 } from '@/lib/api';
+import { getAuthorPlayerId } from '@/lib/chatAuthor';
+import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { fetchRoundScores, type RoundScores } from '@/lib/roundScores';
 import { logUserEvent } from '@/lib/userEvents';
 
@@ -37,6 +42,38 @@ export default function RoundsScreen() {
   const { openDrawer } = useDrawer();
 
   const { selectedGroup, selectedGroupIsMine, selectedSeason, seasonLabel, reload, dataVersion, invalidateData, isSelectedSeasonActive, isSuperAdmin, isGroupAdmin, myPlayerIds } = useGroup();
+  const { markRoundsSeen } = useRoundsUnread();
+
+  // Record the rounds watermark (upsert on the player_id PK) and clear the
+  // tab dot. Mirrors chat.tsx's markRoomRead; failures are non-fatal.
+  const markRoundsRead = useCallback(async () => {
+    markRoundsSeen();
+    const playerId = await getAuthorPlayerId();
+    const token = await getStoredAccessToken();
+    if (!playerId || !token) return;
+    const anonKey = getSupabaseAnonKey();
+    const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
+    try {
+      await fetch(`${base}/rest/v1/rounds_reads`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          apikey: anonKey || token,
+          Prefer: 'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify({ player_id: playerId, last_seen_at: new Date().toISOString() }),
+      });
+    } catch {
+      /* non-fatal; next focus retries */
+    }
+  }, [markRoundsSeen]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void markRoundsRead();
+    }, [markRoundsRead])
+  );
 
   // Log view_rounds_list on initial mount and whenever the selected group
   // or season changes. Read myPlayerIds via a ref so the effect doesn't

@@ -1,5 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors } from '@/constants/theme';
@@ -30,6 +31,27 @@ function getInitials(name: string): string {
   return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
 }
 
+/**
+ * Show the "Enable badge notifications" item only where it can do something:
+ * installed (standalone) web app, Badging API present, and notification
+ * permission not yet decided. iOS is known to misreport Notification.permission
+ * (recon: Apple forums 725619 et al.), so the tap handler stays idempotent —
+ * re-tapping just calls requestPermission() again, which is harmless.
+ */
+function badgePermissionAvailable(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+  const nav = navigator as Navigator & { standalone?: boolean };
+  const standalone =
+    nav.standalone === true ||
+    (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+  if (!standalone) return false;
+  if (!('setAppBadge' in navigator)) return false;
+  if (typeof Notification === 'undefined') return false;
+  return Notification.permission === 'default';
+}
+
 export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: DrawerProps) {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
@@ -39,6 +61,25 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
   const sheetBg = colorScheme === 'dark' ? colors.card : '#FFFFFF';
   const textColor = colors.text;
   const mutedColor = colors.icon;
+
+  // Evaluated per render (cheap, synchronous); hidden once granted or denied.
+  const [badgeItemVisible, setBadgeItemVisible] = useState(badgePermissionAvailable);
+
+  const handleEnableBadges = useCallback(() => {
+    // Permission request MUST run directly in the user gesture (iOS rule).
+    // Tier 2: pushManager.subscribe() goes HERE, in this same gesture, after
+    // (or chained off) the permission grant.
+    void Notification.requestPermission().then((result) => {
+      if (result === 'granted') {
+        setBadgeItemVisible(false);
+        // Tell useAppBadge to re-apply the current count now that it renders.
+        window.dispatchEvent(new Event('windex-badge-permission-granted'));
+      } else if (result === 'denied') {
+        setBadgeItemVisible(false);
+      }
+      // 'default' (dismissed) keeps the item visible for a re-tap.
+    });
+  }, []);
 
   // Single source of truth: myGroups comes from GroupContext (active group_members
   // rows for the current user). The phone GroupPicker uses the same split, so
@@ -124,6 +165,12 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
               <MaterialIcons name="group" size={22} color={mutedColor} style={styles.menuIcon} />
               <Text style={[styles.menuLabel, { color: textColor }]}>Group Details</Text>
             </TouchableOpacity>
+            {badgeItemVisible && (
+              <TouchableOpacity style={styles.menuItem} onPress={handleEnableBadges} activeOpacity={0.6}>
+                <MaterialIcons name="notifications" size={22} color={mutedColor} style={styles.menuIcon} />
+                <Text style={[styles.menuLabel, { color: textColor }]}>Enable badge notifications</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.menuItem} onPress={() => onNavigate('signout')} activeOpacity={0.6}>
               <MaterialIcons name="logout" size={22} color={mutedColor} style={styles.menuIcon} />
               <Text style={[styles.menuLabel, { color: textColor }]}>Sign out</Text>
