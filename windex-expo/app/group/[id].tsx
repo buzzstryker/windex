@@ -268,7 +268,7 @@ export default function GroupDetailScreen() {
               <View style={styles.headerPillRow}>
                 <Pressable
                   style={[styles.broadcastPill, { marginTop: 0, alignSelf: 'auto' }]}
-                  onPress={() => router.push('/(tabs)/analysis')}>
+                  onPress={() => router.push('/metrics')}>
                   <Text style={styles.broadcastPillText}>Metrics</Text>
                 </Pressable>
                 <Pressable

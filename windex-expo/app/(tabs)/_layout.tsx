@@ -55,14 +55,6 @@ export default function TabLayout() {
       />
 
       {/* Hidden tabs — still routable but not shown in the tab bar */}
-      <Tabs.Screen
-        name="analysis"
-        options={{
-          title: 'Metrics',
-          href: null,
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="info.circle.fill" color={color} />,
-        }}
-      />
       <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
       <Tabs.Screen name="history" options={{ href: null }} />

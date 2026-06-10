@@ -10,12 +10,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
-import { Header } from '@/components/Header';
 import { GroupBanner } from '@/components/GroupBanner';
-import { GroupPicker } from '@/components/GroupPicker';
 import { Colors } from '@/constants/theme';
-import { useDrawer } from '@/contexts/DrawerContext';
 import { useGroup } from '@/contexts/GroupContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
@@ -39,11 +37,11 @@ type MatrixData = {
 
 /* ── Component ── */
 
-export default function AnalysisScreen() {
+export default function MetricsScreen() {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { openDrawer } = useDrawer();
+  const router = useRouter();
   const { selectedGroup } = useGroup();
   const groupId = selectedGroup?.id ?? '';
 
@@ -186,7 +184,20 @@ export default function AnalysisScreen() {
 
   return (
     <View style={styles.screen}>
-      <Header title={<GroupPicker tabName="Metrics" />} onMenuPress={openDrawer} />
+      <View style={[styles.header, { paddingTop: insets.top }]}>
+        <View style={styles.headerRow}>
+          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+            <Text style={styles.backArrow}>{'‹'}</Text>
+          </Pressable>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle} numberOfLines={1}>Metrics</Text>
+            {selectedGroup?.name ? (
+              <Text style={styles.headerSubtitle} numberOfLines={1}>{selectedGroup.name}</Text>
+            ) : null}
+          </View>
+          <View style={styles.backButton} />
+        </View>
+      </View>
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}
@@ -444,11 +455,21 @@ export default function AnalysisScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F5F5F5' },
-  headerWrap: { position: 'relative' },
-  headerCenter: {
-    position: 'absolute', left: 0, right: 0, bottom: 0, top: 0,
-    justifyContent: 'center', alignItems: 'center', pointerEvents: 'box-none',
+
+  // Back-chevron header — mirrors app/broadcast-notes.tsx.
+  header: { backgroundColor: OLIVE, width: '100%' },
+  headerRow: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
   },
+  backButton: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
+  backArrow: { fontSize: 32, color: '#FFFFFF', fontWeight: '300', lineHeight: 36 },
+  headerTitleWrap: { flex: 1, alignItems: 'center' },
+  headerTitle: { fontSize: 17, fontWeight: '600', color: '#FFFFFF', textAlign: 'center' },
+  headerSubtitle: { fontSize: 12, color: '#E8EEDD', textAlign: 'center', marginTop: 1 },
   spinner: { marginVertical: 40 },
   errorCard: { backgroundColor: '#FFEBEE', borderRadius: 10, padding: 14, margin: 16 },
   errorText: { color: '#C62828', fontSize: 14 },

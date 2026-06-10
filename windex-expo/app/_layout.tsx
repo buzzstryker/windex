@@ -85,6 +85,7 @@ function RootNavigator() {
         <Stack.Screen name="group/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="group-members" options={{ headerShown: false }} />
         <Stack.Screen name="broadcast-notes" options={{ headerShown: false }} />
+        <Stack.Screen name="metrics" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <Drawer
