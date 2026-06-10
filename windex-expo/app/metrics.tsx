@@ -205,12 +205,12 @@ export default function MetricsScreen() {
         seasonLabel="Points Analysis"
       />
 
-      {/* Sig Events toggle */}
+      {/* Tournaments toggle */}
       <Pressable style={styles.sigToggle} onPress={() => setExcludeSig(!excludeSig)}>
         <View style={[styles.checkbox, excludeSig && styles.checkboxChecked]}>
           {excludeSig && <Text style={styles.checkboxMark}>{'\u2713'}</Text>}
         </View>
-        <Text style={styles.sigToggleText}>Exclude Signature Events</Text>
+        <Text style={styles.sigToggleText}>Exclude Tournaments</Text>
       </Pressable>
 
       {loadingMatrix ? (
@@ -265,7 +265,7 @@ export default function MetricsScreen() {
               <View style={styles.footnoteRow}>
                 <Text style={styles.footnote}>* 2023+ seasons. Parentheses = shared rounds.</Text>
                 <Text style={[styles.sigBadge, { color: excludeSig ? '#C62828' : '#2E7D32' }]}>
-                  Sig Events: {excludeSig ? 'excluded' : 'included'}
+                  Tournaments: {excludeSig ? 'excluded' : 'included'}
                 </Text>
               </View>
             </View>
@@ -284,7 +284,7 @@ export default function MetricsScreen() {
                 </Pressable>
               </View>
               <Text style={[styles.sigBadge, { color: excludeSig ? '#C62828' : '#2E7D32', marginBottom: 6 }]}>
-                Signature Events: {excludeSig ? 'excluded' : 'included'}
+                Tournaments: {excludeSig ? 'excluded' : 'included'}
               </Text>
               {matchups.length === 0 ? (
                 <Text style={styles.cardSubtitle}>No matchups with enough rounds.</Text>

@@ -114,7 +114,7 @@ export function PointsAnalysis() {
 
   const sigBadge = (
     <div style={{ fontSize: 11, color: '#999', marginTop: 4 }}>
-      Signature Events: <strong style={{ color: excludeSig ? '#c62828' : '#2e7d32' }}>{excludeSig ? 'excluded' : 'included'}</strong>
+      Tournaments: <strong style={{ color: excludeSig ? '#c62828' : '#2e7d32' }}>{excludeSig ? 'excluded' : 'included'}</strong>
     </div>
   );
 
@@ -146,7 +146,7 @@ export function PointsAnalysis() {
                 onChange={(e) => setExcludeSig(e.target.checked)}
                 style={{ width: 16, height: 16 }}
               />
-              Exclude Signature Events
+              Exclude Tournaments
             </label>
           </div>
         </div>

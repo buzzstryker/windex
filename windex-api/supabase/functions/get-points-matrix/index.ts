@@ -62,12 +62,12 @@ serve(async (req) => {
   }
 
   // Fetch all rounds (paginated)
-  type Round = { id: string; season_id: string | null; round_date: string; is_signature_event: number; row_type: string };
+  type Round = { id: string; season_id: string | null; round_date: string; is_signature_event: number; is_tournament: number; row_type: string };
   const allRounds: Round[] = [];
   let offset = 0;
   const PAGE = 1000;
   while (true) {
-    let q = supabase.from("league_rounds").select("id, season_id, round_date, is_signature_event, row_type")
+    let q = supabase.from("league_rounds").select("id, season_id, round_date, is_signature_event, is_tournament, row_type")
       .eq("group_id", groupId).order("round_date").range(offset, offset + PAGE - 1);
     if (seasonId) q = q.eq("season_id", seasonId);
     const { data } = await q;
@@ -84,7 +84,10 @@ serve(async (req) => {
     // is_signature_event=1; that flag is now cleared, so gate on row_type.
     if (r.row_type === "season_aggregate") return false;
     if (!seasonId && (!r.season_id || !allowedSeasonIds.has(r.season_id))) return false;
-    if (excludeSig && r.is_signature_event) return false;
+    // Migrations 036-038 reclassified all former signature events as
+    // tournaments (is_tournament=1, is_signature_event=0), so the exclude
+    // toggle must cover both flags or it filters nothing.
+    if (excludeSig && (r.is_signature_event || r.is_tournament)) return false;
     return true;
   });
   const roundIds = rounds.map((r) => r.id);
