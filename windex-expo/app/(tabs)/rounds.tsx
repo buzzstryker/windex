@@ -229,7 +229,13 @@ export default function RoundsScreen() {
       <AddRoundModal
         visible={showAddRound}
         onClose={() => setShowAddRound(false)}
-        onSuccess={() => { invalidateData(); refreshData(); }}
+        onSuccess={() => {
+          invalidateData();
+          refreshData();
+          // Stamp the rounds watermark so the submitter's own round doesn't
+          // light the unread dot on the next check. Non-fatal by design.
+          void markRoundsRead();
+        }}
       />
     </ThemedView>
   );
