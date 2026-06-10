@@ -265,15 +265,22 @@ export default function GroupDetailScreen() {
           <View style={styles.sectionContainer}>
             <View style={styles.seasonHeaderRow}>
               <Text style={styles.sectionTitle}>Current Season</Text>
-              <Pressable
-                style={[styles.broadcastPill, { marginTop: 0, alignSelf: 'auto' }]}
-                onPress={() =>
-                  router.push(
-                    `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
-                  )
-                }>
-                <Text style={styles.broadcastPillText}>Broadcast Notes</Text>
-              </Pressable>
+              <View style={styles.headerPillRow}>
+                <Pressable
+                  style={[styles.broadcastPill, { marginTop: 0, alignSelf: 'auto' }]}
+                  onPress={() => router.push('/(tabs)/analysis')}>
+                  <Text style={styles.broadcastPillText}>Metrics</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.broadcastPill, { marginTop: 0, alignSelf: 'auto' }]}
+                  onPress={() =>
+                    router.push(
+                      `/broadcast-notes?group_id=${id}&group_name=${encodeURIComponent(group?.name ?? '')}` as any
+                    )
+                  }>
+                  <Text style={styles.broadcastPillText}>Broadcast</Text>
+                </Pressable>
+              </View>
             </View>
             {currentSeason ? (
               <View style={styles.seasonCard}>
@@ -502,6 +509,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 12,
+  },
+  headerPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 
   /* Current season card */

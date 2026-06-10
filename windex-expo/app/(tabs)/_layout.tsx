@@ -53,15 +53,16 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="message.fill" color={color} />,
         }}
       />
+
+      {/* Hidden tabs — still routable but not shown in the tab bar */}
       <Tabs.Screen
         name="analysis"
         options={{
-          title: 'Analysis',
+          title: 'Metrics',
+          href: null,
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="info.circle.fill" color={color} />,
         }}
       />
-
-      {/* Hidden tabs — still routable but not shown in the tab bar */}
       <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="explore" options={{ href: null }} />
       <Tabs.Screen name="history" options={{ href: null }} />
