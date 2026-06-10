@@ -27,6 +27,7 @@ import { setComposerBusy } from '@/lib/pwaUpdate';
 
 const ROOM_ID = 'global';
 const PAGE = 50;
+const OLIVE = '#4B5E2A';
 
 type Message = {
   id: string;
@@ -71,7 +72,7 @@ function formatTime(iso: string): string {
 
 function displayName(names: Map<string, PlayerNames>, playerId: string): string {
   const n = names.get(playerId);
-  return n?.full_name || n?.display_name || '—';
+  return n?.display_name || n?.full_name || 'Unknown';
 }
 
 /** Merge fetched rows into existing list, de-duped by id, kept created_at DESC. */
@@ -123,7 +124,9 @@ function useStandaloneKeyboardInset(): number {
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const kbInset = useStandaloneKeyboardInset();
-  const colors = Colors[useColorScheme() ?? 'light'];
+  const scheme = useColorScheme() ?? 'light';
+  const colors = Colors[scheme];
+  const isDark = scheme === 'dark';
   const { openDrawer } = useDrawer();
   const { markRead, setChatFocused } = useChatUnread();
 
@@ -137,6 +140,11 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
+  // Own-message detection for bubble alignment (cached lookup, resolves once).
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  useEffect(() => {
+    void getAuthorPlayerId().then(setMyPlayerId);
+  }, []);
 
   // Tell the PWA updater the composer is "busy" (focused or holding unsent
   // text) so a service-worker auto-reload is deferred until it's safe — never
@@ -356,18 +364,51 @@ export default function ChatScreen() {
   }, [text, sending, resolveNames]);
 
   const renderItem = useCallback(
-    ({ item }: { item: Message }) => (
-      <View style={styles.row}>
-        <Text style={[styles.author, { color: colors.tint }]} numberOfLines={1}>
-          {displayName(names, item.author_player_id)}
-          <Text style={[styles.time, { color: colors.icon }]}>  {formatTime(item.created_at)}</Text>
-        </Text>
-        <Text style={[styles.body, { color: item.deleted_at ? colors.icon : colors.text }]}>
-          {item.deleted_at ? '[deleted]' : item.body}
-        </Text>
-      </View>
-    ),
-    [names, colors]
+    ({ item, index }: { item: Message; index: number }) => {
+      const isMine = myPlayerId != null && item.author_player_id === myPlayerId;
+      // List is created_at DESC, so index+1 is the chronologically previous
+      // message — rendered visually ABOVE this one in the inverted FlatList.
+      const older = messages[index + 1];
+      const authorChanged = !older || older.author_player_id !== item.author_player_id;
+      const showAuthor = !isMine && authorChanged;
+      return (
+        <View
+          style={[
+            styles.row,
+            isMine ? styles.rowMine : styles.rowOther,
+            // In layout (pre-inversion) cells run newest→oldest top→bottom, so
+            // marginBottom here becomes the visual gap to the OLDER message above.
+            { marginBottom: authorChanged ? 10 : 4 },
+          ]}
+        >
+          {showAuthor ? (
+            <Text style={[styles.authorLabel, { color: colors.icon }]} numberOfLines={1}>
+              {displayName(names, item.author_player_id)}
+            </Text>
+          ) : null}
+          <View
+            style={[
+              styles.bubble,
+              isMine
+                ? styles.bubbleMine
+                : { backgroundColor: isDark ? colors.card : '#E9E9EB' },
+            ]}
+          >
+            <Text
+              style={[
+                styles.bubbleText,
+                isMine ? styles.bubbleTextMine : { color: isDark ? colors.text : '#1A1A1A' },
+                item.deleted_at ? styles.deletedText : null,
+              ]}
+            >
+              {item.deleted_at ? '[deleted]' : item.body}
+            </Text>
+          </View>
+          <Text style={[styles.time, { color: colors.icon }]}>{formatTime(item.created_at)}</Text>
+        </View>
+      );
+    },
+    [names, colors, isDark, myPlayerId, messages]
   );
 
   return (
@@ -462,10 +503,21 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 40, transform: [{ scaleY: -1 }] },
   listContent: { paddingHorizontal: 16, paddingVertical: 12 },
-  row: { marginVertical: 6 },
-  author: { fontSize: 13, fontWeight: '600' },
-  time: { fontSize: 11, fontWeight: '400' },
-  body: { fontSize: 15, lineHeight: 20, marginTop: 1 },
+  row: { width: '100%' },
+  rowMine: { alignItems: 'flex-end' },
+  rowOther: { alignItems: 'flex-start' },
+  authorLabel: { fontSize: 12, fontWeight: '600', marginBottom: 2, marginLeft: 12 },
+  bubble: {
+    maxWidth: '78%',
+    borderRadius: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  bubbleMine: { backgroundColor: OLIVE },
+  bubbleText: { fontSize: 15, lineHeight: 20 },
+  bubbleTextMine: { color: '#FFFFFF' },
+  deletedText: { fontStyle: 'italic', opacity: 0.7 },
+  time: { fontSize: 10, fontWeight: '400', marginTop: 2, marginHorizontal: 12 },
   olderSpinner: { paddingVertical: 12 },
   error: { textAlign: 'center', paddingVertical: 6, fontSize: 13 },
   composer: {
