@@ -309,10 +309,21 @@ export default function ChatScreen() {
     void markRoomRead();
   }, [resolveNames, markRoomRead]);
 
-  // Realtime UPDATE handler — replace the row in place (covers soft-deletes
-  // from other devices or an admin). Rows we don't hold are ignored.
+  // Realtime UPDATE handler. A soft-delete (non-null deleted_at) vanishes the
+  // row from view and prunes its orphaned reactions; any other UPDATE (none
+  // exist today given the immutability trigger) replaces in place.
   const onUpdate = useCallback((row: Message) => {
     if (!row || row.room_id !== ROOM_ID) return;
+    if (row.deleted_at) {
+      setMessages((prev) => prev.filter((m) => m.id !== row.id));
+      setReactions((prev) => {
+        if (!prev.has(row.id)) return prev;
+        const next = new Map(prev);
+        next.delete(row.id);
+        return next;
+      });
+      return;
+    }
     setMessages((prev) => prev.map((m) => (m.id === row.id ? row : m)));
   }, []);
 
@@ -378,24 +389,31 @@ export default function ChatScreen() {
     [myPlayerId, addReaction, removeReaction]
   );
 
-  // Soft-delete own message: optimistic flip to [deleted], revert on failure.
+  // Soft-delete own message: optimistic removal from view; on failure (or no
+  // auth), mergeDesc reinserts the row at its original created_at-DESC slot.
   const deleteMessage = useCallback(async (msg: Message) => {
     closeSheet();
-    const now = new Date().toISOString();
-    setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, deleted_at: now } : m)));
+    setMessages((prev) => prev.filter((m) => m.id !== msg.id));
     const headers = await authHeaders();
-    if (!headers) return;
+    if (!headers) {
+      setMessages((prev) => mergeDesc(prev, [msg]));
+      return;
+    }
     try {
       const res = await fetch(`${restBase()}/rest/v1/messages?id=eq.${msg.id}`, {
         method: 'PATCH',
         headers: { ...headers, Prefer: 'return=minimal' },
-        body: JSON.stringify({ deleted_at: now }),
+        body: JSON.stringify({ deleted_at: new Date().toISOString() }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
+      setReactions((prev) => {
+        if (!prev.has(msg.id)) return prev;
+        const next = new Map(prev);
+        next.delete(msg.id);
+        return next;
+      });
     } catch {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === msg.id ? { ...m, deleted_at: msg.deleted_at } : m))
-      );
+      setMessages((prev) => mergeDesc(prev, [msg]));
       setError('Could not delete message.');
     }
   }, [closeSheet]);
@@ -572,13 +590,12 @@ export default function ChatScreen() {
               style={[
                 styles.bubbleText,
                 isMine ? styles.bubbleTextMine : { color: isDark ? colors.text : '#1A1A1A' },
-                item.deleted_at ? styles.deletedText : null,
               ]}
             >
-              {item.deleted_at ? '[deleted]' : item.body}
+              {item.body}
             </Text>
           </Pressable>
-          {!item.deleted_at && pills.length > 0 ? (
+          {pills.length > 0 ? (
             <View style={styles.reactionRow}>
               {pills.map((p) => (
                 <Pressable
@@ -710,7 +727,7 @@ export default function ChatScreen() {
               </>
             ) : (
               <>
-                {sheetTarget && !sheetTarget.deleted_at ? (
+                {sheetTarget ? (
                   <View style={styles.sheetEmojiRow}>
                     {REACTION_EMOJIS.map((e) => {
                       const mine = (reactions.get(sheetTarget.id) ?? []).some(
@@ -732,7 +749,6 @@ export default function ChatScreen() {
                   </View>
                 ) : null}
                 {sheetTarget &&
-                !sheetTarget.deleted_at &&
                 myPlayerId != null &&
                 sheetTarget.author_player_id === myPlayerId ? (
                   <Pressable style={styles.sheetRow} onPress={() => setConfirmDelete(true)}>
@@ -769,7 +785,6 @@ const styles = StyleSheet.create({
   bubbleMine: { backgroundColor: OLIVE },
   bubbleText: { fontSize: 15, lineHeight: 20 },
   bubbleTextMine: { color: '#FFFFFF' },
-  deletedText: { fontStyle: 'italic', opacity: 0.7 },
   time: { fontSize: 10, fontWeight: '400', marginTop: 2, marginHorizontal: 12 },
   olderSpinner: { paddingVertical: 12 },
   error: { textAlign: 'center', paddingVertical: 6, fontSize: 13 },
