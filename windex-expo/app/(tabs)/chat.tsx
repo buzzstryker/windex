@@ -4,6 +4,7 @@ import {
   AppState,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -146,6 +147,15 @@ export default function ChatScreen() {
     void getAuthorPlayerId().then(setMyPlayerId);
   }, []);
 
+  // Long-press action sheet (custom Modal — Alert/ActionSheetIOS are no-ops on
+  // react-native-web). confirmDelete switches the sheet to its confirm step.
+  const [sheetTarget, setSheetTarget] = useState<Message | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const closeSheet = useCallback(() => {
+    setSheetTarget(null);
+    setConfirmDelete(false);
+  }, []);
+
   // Tell the PWA updater the composer is "busy" (focused or holding unsent
   // text) so a service-worker auto-reload is deferred until it's safe — never
   // eating a half-typed message. Release on unmount (leaving the chat tab).
@@ -260,6 +270,35 @@ export default function ChatScreen() {
     void markRoomRead();
   }, [resolveNames, markRoomRead]);
 
+  // Realtime UPDATE handler — replace the row in place (covers soft-deletes
+  // from other devices or an admin). Rows we don't hold are ignored.
+  const onUpdate = useCallback((row: Message) => {
+    if (!row || row.room_id !== ROOM_ID) return;
+    setMessages((prev) => prev.map((m) => (m.id === row.id ? row : m)));
+  }, []);
+
+  // Soft-delete own message: optimistic flip to [deleted], revert on failure.
+  const deleteMessage = useCallback(async (msg: Message) => {
+    closeSheet();
+    const now = new Date().toISOString();
+    setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, deleted_at: now } : m)));
+    const headers = await authHeaders();
+    if (!headers) return;
+    try {
+      const res = await fetch(`${restBase()}/rest/v1/messages?id=eq.${msg.id}`, {
+        method: 'PATCH',
+        headers: { ...headers, Prefer: 'return=minimal' },
+        body: JSON.stringify({ deleted_at: now }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msg.id ? { ...m, deleted_at: msg.deleted_at } : m))
+      );
+      setError('Could not delete message.');
+    }
+  }, [closeSheet]);
+
   const subscribe = useCallback(async () => {
     if (!supabaseRealtime || channelRef.current) return;
     setRealtimeAuth(await getStoredAccessToken()); // belt-and-suspenders: fresh token at subscribe time
@@ -270,9 +309,14 @@ export default function ChatScreen() {
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_id=eq.${ROOM_ID}` },
         (payload) => onInsert(payload.new as Message)
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `room_id=eq.${ROOM_ID}` },
+        (payload) => onUpdate(payload.new as Message)
+      )
       .subscribe();
     channelRef.current = channel;
-  }, [onInsert]);
+  }, [onInsert, onUpdate]);
 
   const unsubscribe = useCallback(() => {
     if (supabaseRealtime && channelRef.current) {
@@ -386,7 +430,11 @@ export default function ChatScreen() {
               {displayName(names, item.author_player_id)}
             </Text>
           ) : null}
-          <View
+          <Pressable
+            onLongPress={() => {
+              setConfirmDelete(false);
+              setSheetTarget(item);
+            }}
             style={[
               styles.bubble,
               isMine
@@ -403,7 +451,7 @@ export default function ChatScreen() {
             >
               {item.deleted_at ? '[deleted]' : item.body}
             </Text>
-          </View>
+          </Pressable>
           <Text style={[styles.time, { color: colors.icon }]}>{formatTime(item.created_at)}</Text>
         </View>
       );
@@ -494,6 +542,44 @@ export default function ChatScreen() {
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Long-press action sheet (custom — works on web and native). */}
+      <Modal visible={sheetTarget != null} transparent animationType="slide" onRequestClose={closeSheet}>
+        <View style={styles.sheetWrap}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} />
+          <View style={[styles.sheet, { backgroundColor: colors.card, paddingBottom: insets.bottom + 12 }]}>
+            {confirmDelete ? (
+              <>
+                <Text style={[styles.sheetTitle, { color: colors.text }]}>Delete this message?</Text>
+                <Pressable
+                  style={styles.sheetRow}
+                  onPress={() => sheetTarget && void deleteMessage(sheetTarget)}
+                >
+                  <Text style={styles.sheetDestructive}>Delete</Text>
+                </Pressable>
+                <Pressable style={styles.sheetRow} onPress={closeSheet}>
+                  <Text style={[styles.sheetRowText, { color: colors.text }]}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                {/* Reaction emoji row slots here (next stage). */}
+                {sheetTarget &&
+                !sheetTarget.deleted_at &&
+                myPlayerId != null &&
+                sheetTarget.author_player_id === myPlayerId ? (
+                  <Pressable style={styles.sheetRow} onPress={() => setConfirmDelete(true)}>
+                    <Text style={styles.sheetDestructive}>Delete message</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable style={styles.sheetRow} onPress={closeSheet}>
+                  <Text style={[styles.sheetRowText, { color: colors.text }]}>Cancel</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -549,4 +635,17 @@ const styles = StyleSheet.create({
   },
   send: { flexShrink: 0, borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
   sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
+
+  /* Long-press action sheet */
+  sheetWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 8,
+    paddingHorizontal: 16,
+  },
+  sheetTitle: { fontSize: 15, fontWeight: '600', textAlign: 'center', paddingVertical: 10 },
+  sheetRow: { paddingVertical: 14, alignItems: 'center' },
+  sheetRowText: { fontSize: 16, fontWeight: '500' },
+  sheetDestructive: { fontSize: 16, fontWeight: '600', color: '#D32F2F' },
 });
