@@ -16,9 +16,11 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import { Header } from '@/components/Header';
 import { Colors } from '@/constants/theme';
+import { useChatUnread } from '@/contexts/ChatUnreadContext';
 import { useDrawer } from '@/contexts/DrawerContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getPlayerNames, getStoredAccessToken, type PlayerNames } from '@/lib/api';
+import { getAuthorPlayerId } from '@/lib/chatAuthor';
 import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { setRealtimeAuth, supabaseRealtime } from '@/lib/supabase';
 import { setComposerBusy } from '@/lib/pwaUpdate';
@@ -38,21 +40,6 @@ type Message = {
 
 const MESSAGE_SELECT =
   'id,room_id,author_player_id,body,attachment_url,created_at,deleted_at';
-
-/** Decode the `sub` (user id) claim from a Supabase JWT. Null on any failure.
- *  Mirrors userIdFromJwt in lib/userEvents.ts (not exported there). */
-function userIdFromJwt(token: string): string | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded)) as { sub?: string };
-    return payload?.sub ?? null;
-  } catch {
-    return null;
-  }
-}
 
 function restBase(): string {
   return getApiBase().replace(/\/functions\/v1\/?$/, '');
@@ -138,6 +125,7 @@ export default function ChatScreen() {
   const kbInset = useStandaloneKeyboardInset();
   const colors = Colors[useColorScheme() ?? 'light'];
   const { openDrawer } = useDrawer();
+  const { markRead, setChatFocused } = useChatUnread();
 
   // Messages are stored newest-first (created_at DESC); the FlatList is
   // `inverted`, so index 0 renders at the bottom → newest at bottom.
@@ -159,7 +147,6 @@ export default function ChatScreen() {
   useEffect(() => () => setComposerBusy(false), []);
 
   const channelRef = useRef<ReturnType<NonNullable<typeof supabaseRealtime>['channel']> | null>(null);
-  const authorIdRef = useRef<string | null>(null); // deterministic single player id, cached for the session
   const loadingOlderRef = useRef(false);
   const hasMoreRef = useRef(true);
 
@@ -233,34 +220,37 @@ export default function ChatScreen() {
     }
   }, [messages, resolveNames]);
 
-  // Deterministic author id: earliest-created player record for this user.
-  const ensureAuthorId = useCallback(async (): Promise<string | null> => {
-    if (authorIdRef.current) return authorIdRef.current;
+  // Record the read watermark (upsert on the (player_id, room_id) PK) and
+  // clear the tab dot. Failures are non-fatal; the next focus retries.
+  const markRoomRead = useCallback(async () => {
+    markRead();
+    const authorId = await getAuthorPlayerId();
     const headers = await authHeaders();
-    const token = await getStoredAccessToken();
-    if (!headers || !token) return null;
-    const uid = userIdFromJwt(token);
-    if (!uid) return null;
+    if (!authorId || !headers) return;
     try {
-      const url =
-        `${restBase()}/rest/v1/players?user_id=eq.${uid}` +
-        `&select=id&order=created_at.asc&limit=1`;
-      const res = await fetch(url, { headers });
-      if (!res.ok) return null;
-      const rows: { id: string }[] = await res.json();
-      authorIdRef.current = rows[0]?.id ?? null;
-      return authorIdRef.current;
+      await fetch(`${restBase()}/rest/v1/room_reads`, {
+        method: 'POST',
+        headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({
+          player_id: authorId,
+          room_id: ROOM_ID,
+          last_read_at: new Date().toISOString(),
+        }),
+      });
     } catch {
-      return null;
+      /* non-fatal */
     }
-  }, []);
+  }, [markRead]);
 
-  // Realtime INSERT handler — prepend (DESC) and de-dupe against optimistic send.
+  // Realtime INSERT handler — prepend (DESC) and de-dupe against optimistic
+  // send. The channel only exists while this screen is focused, so every
+  // insert seen here is "read" — advance the watermark.
   const onInsert = useCallback((row: Message) => {
     if (!row || row.room_id !== ROOM_ID) return;
     setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [row, ...prev]));
     void resolveNames([row]);
-  }, [resolveNames]);
+    void markRoomRead();
+  }, [resolveNames, markRoomRead]);
 
   const subscribe = useCallback(async () => {
     if (!supabaseRealtime || channelRef.current) return;
@@ -294,7 +284,9 @@ export default function ChatScreen() {
   // background, and realtime is not guaranteed delivery across that gap).
   useFocusEffect(
     useCallback(() => {
+      setChatFocused(true);
       void subscribe();
+      void markRoomRead();
       const appSub = AppState.addEventListener('change', (state) => {
         if (state === 'active') {
           void subscribe();
@@ -306,8 +298,9 @@ export default function ChatScreen() {
       return () => {
         appSub.remove();
         unsubscribe();
+        setChatFocused(false);
       };
-    }, [subscribe, unsubscribe, loadLatest])
+    }, [subscribe, unsubscribe, loadLatest, markRoomRead, setChatFocused])
   );
 
   const send = useCallback(async () => {
@@ -315,7 +308,7 @@ export default function ChatScreen() {
     if (!trimmed || sending) return;
     setSending(true);
     setError(null);
-    const authorId = await ensureAuthorId();
+    const authorId = await getAuthorPlayerId();
     if (!authorId) {
       setError('No player profile found for your account.');
       setSending(false);
@@ -360,7 +353,7 @@ export default function ChatScreen() {
     } finally {
       setSending(false);
     }
-  }, [text, sending, ensureAuthorId, resolveNames]);
+  }, [text, sending, resolveNames]);
 
   const renderItem = useCallback(
     ({ item }: { item: Message }) => (

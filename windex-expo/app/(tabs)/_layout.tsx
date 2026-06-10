@@ -4,6 +4,7 @@ import React from 'react';
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
+import { ChatUnreadProvider, useChatUnread } from '@/contexts/ChatUnreadContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 // Pin the tab navigator's default focused tab to Standings. Without this the
@@ -16,8 +17,17 @@ export const unstable_settings = {
 };
 
 export default function TabLayout() {
+  return (
+    <ChatUnreadProvider>
+      <TabLayoutInner />
+    </ChatUnreadProvider>
+  );
+}
+
+function TabLayoutInner() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
+  const { hasUnread } = useChatUnread();
 
   return (
     <Tabs
@@ -51,6 +61,16 @@ export default function TabLayout() {
         options={{
           title: 'Chat',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="message.fill" color={color} />,
+          // Empty-string badge + dot-sized style = plain unread dot.
+          tabBarBadge: hasUnread ? '' : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: '#D32F2F',
+            minWidth: 10,
+            maxWidth: 10,
+            height: 10,
+            borderRadius: 5,
+            top: 2,
+          },
         }}
       />
 
