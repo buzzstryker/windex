@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { Image as ExpoImage } from 'expo-image';
 
 import { Header } from '@/components/Header';
 import { Colors } from '@/constants/theme';
@@ -49,6 +50,77 @@ type Reaction = {
   player_id: string;
   emoji: string;
 };
+
+/** Composer attachment after the canvas pipeline: re-encoded JPEG + dims. */
+type PendingImage = {
+  blob: Blob;
+  width: number;
+  height: number;
+  previewUrl: string;
+};
+
+/** Max long edge after downscale (never upscales). */
+const IMAGE_MAX_EDGE = 1600;
+const IMAGE_JPEG_QUALITY = 0.82;
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024; // matches the bucket's 5 MiB cap
+
+/**
+ * Web-only canvas pipeline: decode → downscale to IMAGE_MAX_EDGE → re-encode
+ * JPEG. Also normalizes anything the browser can decode (HEIC on Safari,
+ * webp, png) to JPEG. Returns null if the file can't be decoded.
+ */
+async function processImage(file: File): Promise<{ blob: Blob; width: number; height: number } | null> {
+  try {
+    let source: CanvasImageSource;
+    let srcW: number;
+    let srcH: number;
+    const bitmap = await createImageBitmap(file).catch(() => null);
+    if (bitmap) {
+      source = bitmap;
+      srcW = bitmap.width;
+      srcH = bitmap.height;
+    } else {
+      // Fallback decoder for types createImageBitmap rejects.
+      const objUrl = URL.createObjectURL(file);
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new window.Image();
+          el.onload = () => resolve(el);
+          el.onerror = reject;
+          el.src = objUrl;
+        });
+        source = img;
+        srcW = img.naturalWidth;
+        srcH = img.naturalHeight;
+      } finally {
+        URL.revokeObjectURL(objUrl);
+      }
+    }
+    if (!srcW || !srcH) return null;
+    const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(srcW, srcH));
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0, w, h);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', IMAGE_JPEG_QUALITY)
+    );
+    if (!blob) return null;
+    return { blob, width: w, height: h };
+  } catch {
+    return null;
+  }
+}
+
+/** Dimensions encoded in the attachment URL fragment (#w=...&h=...). */
+function parseDims(url: string): { w: number; h: number } | null {
+  const m = url.match(/#w=(\d+)&h=(\d+)/);
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+}
 
 function restBase(): string {
   return getApiBase().replace(/\/functions\/v1\/?$/, '');
@@ -150,6 +222,8 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inputFocused, setInputFocused] = useState(false);
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Own-message detection for bubble alignment (cached lookup, resolves once).
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   useEffect(() => {
@@ -169,8 +243,8 @@ export default function ChatScreen() {
   // text) so a service-worker auto-reload is deferred until it's safe — never
   // eating a half-typed message. Release on unmount (leaving the chat tab).
   useEffect(() => {
-    setComposerBusy(inputFocused || text.trim().length > 0);
-  }, [inputFocused, text]);
+    setComposerBusy(inputFocused || text.trim().length > 0 || pendingImage != null);
+  }, [inputFocused, text, pendingImage]);
   useEffect(() => () => setComposerBusy(false), []);
 
   const channelRef = useRef<ReturnType<NonNullable<typeof supabaseRealtime>['channel']> | null>(null);
@@ -486,9 +560,45 @@ export default function ChatScreen() {
     }, [subscribe, unsubscribe, loadLatest, markRoomRead, setChatFocused])
   );
 
+  // Web-only photo picker: imperative hidden file input (react-native-web
+  // can't render a DOM <input>), canvas pipeline, thumbnail into the composer.
+  const pickImage = useCallback(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const processed = await processImage(file);
+      if (!processed) {
+        setError('Could not read that image.');
+        return;
+      }
+      if (processed.blob.size > IMAGE_MAX_BYTES) {
+        setError('Image is too large even after compression (5 MB max).');
+        return;
+      }
+      setError(null);
+      setPendingImage((prev) => {
+        if (prev) URL.revokeObjectURL(prev.previewUrl);
+        return { ...processed, previewUrl: URL.createObjectURL(processed.blob) };
+      });
+    };
+    input.click();
+  }, []);
+
+  const cancelPendingImage = useCallback(() => {
+    setPendingImage((prev) => {
+      if (prev) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
   const send = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    const img = pendingImage;
+    if ((!trimmed && !img) || sending) return;
     setSending(true);
     setError(null);
     const authorId = await getAuthorPlayerId();
@@ -507,36 +617,61 @@ export default function ChatScreen() {
       id: crypto.randomUUID(),
       room_id: ROOM_ID,
       author_player_id: authorId,
-      body: trimmed,
-      attachment_url: null,
+      body: trimmed || null,
+      // Local object URL until the server row replaces it on the next merge;
+      // dims ride the fragment exactly like the real URL's.
+      attachment_url: img ? `${img.previewUrl}#w=${img.width}&h=${img.height}` : null,
       created_at: new Date().toISOString(),
       deleted_at: null,
     };
     // Optimistic append; realtime echo de-dupes by id.
     setMessages((prev) => [optimistic, ...prev]);
     setText('');
+    setPendingImage(null);
     void resolveNames([optimistic]);
+    const restore = () => {
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      setText(trimmed);
+      setPendingImage(img);
+    };
     try {
+      let attachmentUrl: string | null = null;
+      if (img) {
+        // Upload first, then post the message referencing the public URL.
+        // If the message POST fails after upload, the object orphans
+        // (accepted debt, same class as delete-orphans).
+        const path = `${authorId}/${crypto.randomUUID()}.jpg`;
+        const up = await fetch(`${restBase()}/storage/v1/object/chat-images/${path}`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'image/jpeg' },
+          body: img.blob,
+        });
+        if (!up.ok) throw new Error(`upload ${up.status}`);
+        attachmentUrl =
+          `${restBase()}/storage/v1/object/public/chat-images/${path}` +
+          `#w=${img.width}&h=${img.height}`;
+      }
       const res = await fetch(`${restBase()}/rest/v1/messages`, {
         method: 'POST',
         headers: { ...headers, Prefer: 'return=minimal' },
         body: JSON.stringify({
           id: optimistic.id,
           room_id: ROOM_ID,
-          body: trimmed,
+          body: trimmed || null,
+          attachment_url: attachmentUrl,
           author_player_id: authorId,
         }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
+      // Success: keep the preview object URL alive — the optimistic row
+      // still references it until a gap-fill swaps in the server row.
     } catch {
-      // Roll back the optimistic row and restore the draft.
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
-      setText(trimmed);
+      restore();
       setError('Message failed to send.');
     } finally {
       setSending(false);
     }
-  }, [text, sending, resolveNames]);
+  }, [text, sending, pendingImage, resolveNames]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: Message; index: number }) => {
@@ -575,6 +710,9 @@ export default function ChatScreen() {
             </Text>
           ) : null}
           <Pressable
+            onPress={
+              item.attachment_url ? () => setLightboxUrl(item.attachment_url) : undefined
+            }
             onLongPress={() => {
               setConfirmDelete(false);
               setSheetTarget(item);
@@ -584,16 +722,52 @@ export default function ChatScreen() {
               isMine
                 ? styles.bubbleMine
                 : { backgroundColor: isDark ? colors.card : '#E9E9EB' },
+              item.attachment_url ? styles.bubbleWithImage : null,
             ]}
           >
-            <Text
-              style={[
-                styles.bubbleText,
-                isMine ? styles.bubbleTextMine : { color: isDark ? colors.text : '#1A1A1A' },
-              ]}
-            >
-              {item.body}
-            </Text>
+            {item.attachment_url ? (
+              <>
+                {(() => {
+                  const dims = parseDims(item.attachment_url);
+                  // Cap to 240w x 320h at the image's aspect ratio; square
+                  // fallback for rows without the fragment (hand-inserted).
+                  let dw = 220;
+                  let dh = 220;
+                  if (dims && dims.w > 0 && dims.h > 0) {
+                    const scale = Math.min(240 / dims.w, 320 / dims.h, 1);
+                    dw = Math.max(1, Math.round(dims.w * scale));
+                    dh = Math.max(1, Math.round(dims.h * scale));
+                  }
+                  return (
+                    <ExpoImage
+                      source={{ uri: item.attachment_url }}
+                      style={{ width: dw, height: dh }}
+                      contentFit="cover"
+                    />
+                  );
+                })()}
+                {item.body ? (
+                  <Text
+                    style={[
+                      styles.bubbleText,
+                      styles.captionPad,
+                      isMine ? styles.bubbleTextMine : { color: isDark ? colors.text : '#1A1A1A' },
+                    ]}
+                  >
+                    {item.body}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              <Text
+                style={[
+                  styles.bubbleText,
+                  isMine ? styles.bubbleTextMine : { color: isDark ? colors.text : '#1A1A1A' },
+                ]}
+              >
+                {item.body}
+              </Text>
+            )}
           </Pressable>
           {pills.length > 0 ? (
             <View style={styles.reactionRow}>
@@ -670,6 +844,19 @@ export default function ChatScreen() {
           <Text style={[styles.error, { color: colors.negative }]}>{error}</Text>
         ) : null}
 
+        {pendingImage ? (
+          <View style={[styles.pendingWrap, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <ExpoImage
+              source={{ uri: pendingImage.previewUrl }}
+              style={styles.pendingThumb}
+              contentFit="cover"
+            />
+            <Pressable onPress={cancelPendingImage} hitSlop={8} style={styles.pendingCancel}>
+              <Text style={styles.pendingCancelText}>✕</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         <View
           style={[
             styles.composer,
@@ -682,6 +869,11 @@ export default function ChatScreen() {
             },
           ]}
         >
+          {Platform.OS === 'web' ? (
+            <Pressable onPress={pickImage} disabled={sending} style={styles.attachBtn} hitSlop={4}>
+              <Text style={styles.attachIcon}>📷</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.inputWrap}>
             <TextInput
               style={[styles.input, { color: colors.text, backgroundColor: colors.background, borderColor: colors.border }]}
@@ -696,16 +888,36 @@ export default function ChatScreen() {
           </View>
           <Pressable
             onPress={send}
-            disabled={sending || text.trim().length === 0}
+            disabled={sending || (text.trim().length === 0 && !pendingImage)}
             style={[
               styles.send,
-              { backgroundColor: colors.tint, opacity: sending || text.trim().length === 0 ? 0.5 : 1 },
+              {
+                backgroundColor: colors.tint,
+                opacity: sending || (text.trim().length === 0 && !pendingImage) ? 0.5 : 1,
+              },
             ]}
           >
             <Text style={styles.sendText}>Send</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Full-screen image lightbox: tap anywhere to dismiss. */}
+      <Modal
+        visible={lightboxUrl != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLightboxUrl(null)}
+      >
+        <Pressable style={styles.lightboxWrap} onPress={() => setLightboxUrl(null)}>
+          <ExpoImage
+            source={{ uri: lightboxUrl ?? '' }}
+            style={styles.lightboxImage}
+            contentFit="contain"
+            pointerEvents="none"
+          />
+        </Pressable>
+      </Modal>
 
       {/* Long-press action sheet (custom — works on web and native). */}
       <Modal visible={sheetTarget != null} transparent animationType="slide" onRequestClose={closeSheet}>
@@ -783,8 +995,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   bubbleMine: { backgroundColor: OLIVE },
+  // Image fills to the bubble radius; caption re-adds its own padding.
+  bubbleWithImage: { paddingVertical: 0, paddingHorizontal: 0, overflow: 'hidden' },
   bubbleText: { fontSize: 15, lineHeight: 20 },
   bubbleTextMine: { color: '#FFFFFF' },
+  captionPad: { paddingVertical: 8, paddingHorizontal: 12 },
   time: { fontSize: 10, fontWeight: '400', marginTop: 2, marginHorizontal: 12 },
   olderSpinner: { paddingVertical: 12 },
   error: { textAlign: 'center', paddingVertical: 6, fontSize: 13 },
@@ -817,6 +1032,43 @@ const styles = StyleSheet.create({
   },
   send: { flexShrink: 0, borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
   sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
+
+  /* Photo attachment */
+  attachBtn: {
+    flexShrink: 0,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachIcon: { fontSize: 22 },
+  pendingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  pendingThumb: { width: 56, height: 56, borderRadius: 8 },
+  pendingCancel: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -20,
+    marginTop: -40,
+  },
+  pendingCancelText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  lightboxWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightboxImage: { width: '100%', height: '100%' },
 
   /* Long-press action sheet */
   sheetWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
