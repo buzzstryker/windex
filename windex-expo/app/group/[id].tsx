@@ -15,6 +15,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   ApiError,
+  getChampionshipResults,
   listGroups,
   listSections,
   listSeasons,
@@ -22,7 +23,10 @@ import {
   getStandings,
   getActiveMemberCount,
   getPlayerNames,
+  ordinalPlace,
   seasonLabel,
+  tiedPlaces,
+  type ChampionshipResult,
   type Group,
   type PlayerNames,
   type Season,
@@ -54,8 +58,20 @@ export default function GroupDetailScreen() {
   const [activeMemberCount, setActiveMemberCount] = useState<number | null>(null);
   const [seasonInfos, setSeasonInfos] = useState<SeasonInfo[]>([]);
   const [playerNames, setPlayerNames] = useState<Map<string, PlayerNames>>(new Map());
+  // Canonical championship finish orders keyed by season_id (migration 032).
+  const [champBySeason, setChampBySeason] = useState<Map<string, ChampionshipResult[]>>(new Map());
+  const [expandedChamps, setExpandedChamps] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleChampExpand = (seasonId: string) => {
+    setExpandedChamps((prev) => {
+      const next = new Set(prev);
+      if (next.has(seasonId)) next.delete(seasonId);
+      else next.add(seasonId);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -123,14 +139,30 @@ export default function GroupDetailScreen() {
         if (cancelled) return;
         setSeasonInfos(infos);
 
-        // Resolve full_name for both cup champions and points winners in one
-        // batched lookup against /rest/v1/players.
+        // Canonical championship placements (full finish orders + co-champion
+        // ties). The compat column seasons.cup_champion_player_id stays as a
+        // fallback only.
+        const champRows = await getChampionshipResults({ group_id: id });
+        if (cancelled) return;
+        const bySeason = new Map<string, ChampionshipResult[]>();
+        for (const r of champRows) {
+          const list = bySeason.get(r.season_id);
+          if (list) list.push(r);
+          else bySeason.set(r.season_id, [r]);
+        }
+        setChampBySeason(bySeason);
+
+        // Resolve full_name for cup champions, points winners, and every
+        // championship placement in one batched lookup against /rest/v1/players.
         const idsToLookup = new Set<string>();
         for (const s of sorted) {
           if (s.cup_champion_player_id) idsToLookup.add(s.cup_champion_player_id);
         }
         for (const info of infos) {
           if (info.pointsWinner) idsToLookup.add(info.pointsWinner.player_id);
+        }
+        for (const r of champRows) {
+          idsToLookup.add(r.player_id);
         }
         if (idsToLookup.size > 0) {
           const names = await getPlayerNames(Array.from(idsToLookup));
@@ -307,29 +339,64 @@ export default function GroupDetailScreen() {
                   const rec = playerNames.get(pid);
                   return rec?.full_name ?? rec?.display_name ?? pid.slice(0, 8);
                 };
-                const cupChampionName = resolveName(si.season.cup_champion_player_id);
+                const champRows = champBySeason.get(si.season.id) ?? [];
+                const winners = champRows.filter((r) => r.place === 1);
+                // Canonical place=1 rows (renders co-champions "A & B");
+                // compat-column fallback for seasons with no placement rows.
+                const cupChampionName =
+                  winners.length > 0
+                    ? winners.map((w) => resolveName(w.player_id) ?? '\u2014').join(' & ')
+                    : resolveName(si.season.cup_champion_player_id);
                 const pointsWinnerName = si.pointsWinner ? resolveName(si.pointsWinner.player_id) : null;
+                const expandable = champRows.some((r) => r.place > 1);
+                const expanded = expandable && expandedChamps.has(si.season.id);
+                const tied = tiedPlaces(champRows);
                 return (
-                  <View key={si.season.id} style={styles.prevSeasonCard}>
-                    <Text style={styles.prevSeasonYear}>{seasonLabel(si.season)}</Text>
-                    <View style={styles.prevSeasonRows}>
-                      <View style={styles.prevSeasonRow}>
-                        <Text style={styles.prevSeasonLabel}>Cup Champion: </Text>
-                        <Text style={cupChampionName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
-                          {cupChampionName ?? '\u2014'}
-                        </Text>
+                  <Pressable
+                    key={si.season.id}
+                    style={styles.prevSeasonCard}
+                    onPress={expandable ? () => toggleChampExpand(si.season.id) : undefined}
+                    disabled={!expandable}
+                  >
+                    <View style={styles.prevSeasonMain}>
+                      <Text style={styles.prevSeasonYear}>{seasonLabel(si.season)}</Text>
+                      <View style={styles.prevSeasonRows}>
+                        <View style={styles.prevSeasonRow}>
+                          <Text style={styles.prevSeasonLabel}>Cup Champion: </Text>
+                          <Text style={cupChampionName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
+                            {cupChampionName ?? '\u2014'}
+                          </Text>
+                        </View>
+                        <View style={styles.prevSeasonRow}>
+                          <Text style={styles.prevSeasonLabel}>Points Champion: </Text>
+                          <Text style={pointsWinnerName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
+                            {pointsWinnerName ?? '\u2014'}
+                          </Text>
+                          {si.pointsWinner ? (
+                            <Text style={styles.prevSeasonPts}>{si.pointsWinner.points}</Text>
+                          ) : null}
+                        </View>
                       </View>
-                      <View style={styles.prevSeasonRow}>
-                        <Text style={styles.prevSeasonLabel}>Points Champion: </Text>
-                        <Text style={pointsWinnerName ? styles.prevSeasonName : styles.prevSeasonNameEmpty}>
-                          {pointsWinnerName ?? '\u2014'}
-                        </Text>
-                        {si.pointsWinner ? (
-                          <Text style={styles.prevSeasonPts}>{si.pointsWinner.points}</Text>
-                        ) : null}
-                      </View>
+                      {expandable ? (
+                        <Text style={styles.champChevron}>{expanded ? '\u25be' : '\u25b8'}</Text>
+                      ) : null}
                     </View>
-                  </View>
+                    {expanded ? (
+                      <View style={styles.champOrder}>
+                        {champRows.map((r) => (
+                          <View key={r.player_id} style={styles.champOrderRow}>
+                            <Text style={styles.champOrderPlace}>
+                              {r.place === 1 ? '\ud83c\udfc6 ' : ''}
+                              {ordinalPlace(r.place, tied.has(r.place))}
+                            </Text>
+                            <Text style={styles.champOrderName} numberOfLines={1}>
+                              {resolveName(r.player_id) ?? '\u2014'}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
+                  </Pressable>
                 );
               })}
             </View>
@@ -566,6 +633,8 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
     padding: 14,
     marginBottom: 10,
+  },
+  prevSeasonMain: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
@@ -606,5 +675,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: OLIVE,
     marginLeft: 8,
+  },
+
+  /* Championship finish order (expandable) */
+  champChevron: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginLeft: 8,
+    marginTop: 2,
+  },
+  champOrder: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#EEEEEE',
+  },
+  champOrderRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 3,
+  },
+  champOrderPlace: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: OLIVE,
+    width: 64,
+    fontVariant: ['tabular-nums'],
+  },
+  champOrderName: {
+    fontSize: 14,
+    color: '#1A1A1A',
+    flex: 1,
   },
 });

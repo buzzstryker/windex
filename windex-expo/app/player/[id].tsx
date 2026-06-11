@@ -17,8 +17,14 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   ApiError,
+  getChampionshipResults,
   listEvents,
+  ordinalPlace,
+  seasonLabel,
+  tiedPlaces,
+  type ChampionshipResult,
   type EventSummary,
+  type Season,
 } from '@/lib/api';
 import { fetchRoundScores, type RoundScores } from '@/lib/roundScores';
 
@@ -61,6 +67,20 @@ export default function PlayerRoundsScreen() {
   const [roundScores, setRoundScores] = useState<RoundScores>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Group-scoped (not player-scoped) so tie detection sees every row in
+  // each season, not just this player's.
+  const [groupChamps, setGroupChamps] = useState<ChampionshipResult[]>([]);
+
+  useEffect(() => {
+    if (!groupId) return;
+    let cancelled = false;
+    getChampionshipResults({ group_id: groupId })
+      .then((rows) => {
+        if (!cancelled) setGroupChamps(rows);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [groupId]);
 
   useEffect(() => {
     if (!groupId || !seasonId) {
@@ -116,6 +136,51 @@ export default function PlayerRoundsScreen() {
     />
   );
 
+  // This player's placements, newest season first, with per-season tie flags.
+  const myPlacements = useMemo(() => {
+    const bySeason = new Map<string, ChampionshipResult[]>();
+    for (const r of groupChamps) {
+      const list = bySeason.get(r.season_id);
+      if (list) list.push(r);
+      else bySeason.set(r.season_id, [r]);
+    }
+    return groupChamps
+      .filter((r) => r.player_id === playerId)
+      .map((r) => ({
+        row: r,
+        tied: tiedPlaces(bySeason.get(r.season_id) ?? []).has(r.place),
+        label: seasonLabel({
+          id: r.season_id,
+          start_date: r.seasons?.start_date,
+          end_date: r.seasons?.end_date,
+        } as Season),
+      }))
+      .sort((a, b) =>
+        (b.row.seasons?.start_date ?? '').localeCompare(a.row.seasons?.start_date ?? '')
+      );
+  }, [groupChamps, playerId]);
+
+  const championshipsCard =
+    myPlacements.length > 0 ? (
+      <View style={[styles.champCard, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        <Text style={[styles.champTitle, { color: muted }]}>CUP CHAMPIONSHIPS</Text>
+        {myPlacements.map((p) => (
+          <View key={p.row.season_id} style={styles.champRow}>
+            <Text style={[styles.champSeason, { color: colors.text }]}>{p.label}</Text>
+            <Text
+              style={[
+                styles.champPlace,
+                { color: p.row.place === 1 ? OLIVE : colors.text },
+              ]}
+            >
+              {p.row.place === 1 ? '🏆 ' : ''}
+              {ordinalPlace(p.row.place, p.tied)}
+            </Text>
+          </View>
+        ))}
+      </View>
+    ) : null;
+
   const summaryStrip = (
     <View style={styles.summaryRow}>
       <View style={styles.summaryBlock}>
@@ -158,6 +223,7 @@ export default function PlayerRoundsScreen() {
       ) : events.length === 0 && !error ? (
         <>
           {summaryStrip}
+          {championshipsCard}
           <ThemedText style={[styles.empty, { color: muted }]}>
             No rounds found for this player in this season.
           </ThemedText>
@@ -167,7 +233,12 @@ export default function PlayerRoundsScreen() {
           data={events}
           keyExtractor={(item) => item.id}
           renderItem={renderRound}
-          ListHeaderComponent={summaryStrip}
+          ListHeaderComponent={
+            <>
+              {summaryStrip}
+              {championshipsCard}
+            </>
+          }
           contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 24 }]}
         />
       )}
@@ -230,4 +301,29 @@ const styles = StyleSheet.create({
   spinner: { marginVertical: 24 },
   empty: { textAlign: 'center', marginTop: 24, fontSize: 15 },
   listContent: { paddingHorizontal: 16 },
+
+  /* Cup Championships card — label style mirrors summaryLabel. */
+  champCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  champTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  champRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  champSeason: { fontSize: 15, fontWeight: '500' },
+  champPlace: { fontSize: 15, fontWeight: '700', fontVariant: ['tabular-nums'] },
 });

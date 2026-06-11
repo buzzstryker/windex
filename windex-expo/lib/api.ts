@@ -454,6 +454,78 @@ export function seasonLabel(s: Season): string {
   return String(mid.getFullYear());
 }
 
+/* --- Championship results --- */
+
+/** One row of a season's championship finish order (migration 032).
+ *  Ties share a place; the next place skips ahead (1, 2, 2, 4...). */
+export type ChampionshipResult = {
+  season_id: string;
+  group_id: string;
+  player_id: string;
+  place: number;
+  /** Embedded season dates for labeling (PostgREST FK embed). */
+  seasons: { start_date: string; end_date: string } | null;
+};
+
+/**
+ * Fetch championship placements via PostgREST (SELECT is open to any
+ * authenticated user per migration 032's RLS). Filter by group and/or
+ * player; same auth-header pattern as getPlayerNames. Returns [] on any
+ * failure so a missing table read never blocks a page render.
+ */
+export async function getChampionshipResults(filter: {
+  player_id?: string;
+  group_id?: string;
+}): Promise<ChampionshipResult[]> {
+  const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
+  const token = await getAccessToken();
+  if (!base || !token) return [];
+  try {
+    const anonKey = getSupabaseAnonKey();
+    const params = new URLSearchParams({
+      select: 'season_id,group_id,player_id,place,seasons(start_date,end_date)',
+      order: 'season_id.asc,place.asc',
+    });
+    if (filter.player_id) params.set('player_id', `eq.${filter.player_id}`);
+    if (filter.group_id) params.set('group_id', `eq.${filter.group_id}`);
+    const res = await fetch(`${base}/rest/v1/championship_results?${params}`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: anonKey || token },
+    });
+    if (!res.ok) return [];
+    return (await res.json()) as ChampionshipResult[];
+  } catch {
+    return [];
+  }
+}
+
+/** Places shared by ≥2 rows (i.e. ties) within one season's rows. */
+export function tiedPlaces(rows: ChampionshipResult[]): Set<number> {
+  const counts = new Map<number, number>();
+  for (const r of rows) counts.set(r.place, (counts.get(r.place) ?? 0) + 1);
+  const tied = new Set<number>();
+  counts.forEach((c, place) => {
+    if (c > 1) tied.add(place);
+  });
+  return tied;
+}
+
+/** "1st" / "2nd" / "3rd" / "4th"…, with a "T-" prefix when tied. */
+export function ordinalPlace(place: number, tied: boolean): string {
+  const mod100 = place % 100;
+  const mod10 = place % 10;
+  const suffix =
+    mod100 >= 11 && mod100 <= 13
+      ? 'th'
+      : mod10 === 1
+        ? 'st'
+        : mod10 === 2
+          ? 'nd'
+          : mod10 === 3
+            ? 'rd'
+            : 'th';
+  return `${tied ? 'T-' : ''}${place}${suffix}`;
+}
+
 /* --- Points Analysis --- */
 
 export type PointsAnalysisResponse = {
