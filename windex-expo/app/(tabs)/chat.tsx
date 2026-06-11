@@ -774,7 +774,17 @@ export default function ChatScreen() {
               {pills.map((p) => (
                 <Pressable
                   key={p.emoji}
-                  onPress={() => void toggleReaction(item.id, p.emoji, p.mine)}
+                  // Adding is one tap; removing is deliberate — a tap on a
+                  // pill I've reacted with opens the sheet (same path as
+                  // long-press), where my highlighted emoji removes it.
+                  onPress={() => {
+                    if (p.mine) {
+                      setConfirmDelete(false);
+                      setSheetTarget(item);
+                    } else {
+                      void toggleReaction(item.id, p.emoji, false);
+                    }
+                  }}
                   style={[
                     styles.reactionPill,
                     {
