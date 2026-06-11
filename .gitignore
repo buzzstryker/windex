@@ -25,3 +25,7 @@ Thumbs.db
 
 # Brand assets uploaded for in-chat image editing — not part of the codebase
 /windex-cup.png
+
+# Stale one-time data export from the May playoff-insights prototype
+# (superseded by Broadcast Notes)
+/playoff-insights-data.json
