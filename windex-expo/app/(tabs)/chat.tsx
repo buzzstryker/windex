@@ -1041,7 +1041,7 @@ const styles = StyleSheet.create({
   bubbleMine: { backgroundColor: OLIVE },
   // Image fills to the bubble radius; caption re-adds its own padding.
   bubbleWithImage: { paddingVertical: 0, paddingHorizontal: 0, overflow: 'hidden' },
-  bubbleText: { fontSize: 15, lineHeight: 20 },
+  bubbleText: { fontSize: 17, lineHeight: 22 },
   bubbleTextMine: { color: '#FFFFFF' },
   captionPad: { paddingVertical: 8, paddingHorizontal: 12 },
   time: { fontSize: 10, fontWeight: '400', marginTop: 2, marginHorizontal: 12 },
@@ -1071,7 +1071,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: 10,
-    fontSize: 16, // >=16px: iOS auto-zooms on focusing an input under 16px; that
+    fontSize: 17, // >=16px: iOS auto-zooms on focusing an input under 16px; that
                   // zoom (not any offset math) is what shoved the composer off-screen.
   },
   send: { flexShrink: 0, borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
