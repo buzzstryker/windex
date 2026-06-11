@@ -1131,11 +1131,11 @@ const styles = StyleSheet.create({
   reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2, maxWidth: '78%' },
   reactionPill: {
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
   },
-  reactionPillText: { fontSize: 15 },
+  reactionPillText: { fontSize: 18 },
   sheetEmojiRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 10 },
   sheetEmojiBtn: {
     width: 52,
