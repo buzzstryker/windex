@@ -234,9 +234,12 @@ export default function ChatScreen() {
   // react-native-web). confirmDelete switches the sheet to its confirm step.
   const [sheetTarget, setSheetTarget] = useState<Message | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Non-null = sheet opens straight into "Remove your <emoji> reaction?".
+  const [confirmRemoveEmoji, setConfirmRemoveEmoji] = useState<string | null>(null);
   const closeSheet = useCallback(() => {
     setSheetTarget(null);
     setConfirmDelete(false);
+    setConfirmRemoveEmoji(null);
   }, []);
 
   // Tell the PWA updater the composer is "busy" (focused or holding unsent
@@ -715,6 +718,7 @@ export default function ChatScreen() {
             }
             onLongPress={() => {
               setConfirmDelete(false);
+              setConfirmRemoveEmoji(null);
               setSheetTarget(item);
             }}
             style={[
@@ -774,17 +778,27 @@ export default function ChatScreen() {
               {pills.map((p) => (
                 <Pressable
                   key={p.emoji}
-                  // Adding is one tap; removing is deliberate — a tap on a
-                  // pill I've reacted with opens the sheet (same path as
-                  // long-press), where my highlighted emoji removes it.
+                  // Adding is one tap; removing is deliberate — tapping (or
+                  // long-pressing) a pill I've reacted with opens the sheet
+                  // directly in remove-confirm mode for that emoji.
                   onPress={() => {
                     if (p.mine) {
                       setConfirmDelete(false);
+                      setConfirmRemoveEmoji(p.emoji);
                       setSheetTarget(item);
                     } else {
                       void toggleReaction(item.id, p.emoji, false);
                     }
                   }}
+                  onLongPress={
+                    p.mine
+                      ? () => {
+                          setConfirmDelete(false);
+                          setConfirmRemoveEmoji(p.emoji);
+                          setSheetTarget(item);
+                        }
+                      : undefined
+                  }
                   style={[
                     styles.reactionPill,
                     {
@@ -947,6 +961,26 @@ export default function ChatScreen() {
                   <Text style={[styles.sheetRowText, { color: colors.text }]}>Cancel</Text>
                 </Pressable>
               </>
+            ) : confirmRemoveEmoji != null ? (
+              <>
+                <Text style={[styles.sheetTitle, { color: colors.text }]}>
+                  Remove your {confirmRemoveEmoji} reaction?
+                </Text>
+                <Pressable
+                  style={styles.sheetRow}
+                  onPress={() => {
+                    const target = sheetTarget;
+                    const emoji = confirmRemoveEmoji;
+                    closeSheet();
+                    if (target && emoji) void toggleReaction(target.id, emoji, true);
+                  }}
+                >
+                  <Text style={styles.sheetDestructive}>Remove</Text>
+                </Pressable>
+                <Pressable style={styles.sheetRow} onPress={closeSheet}>
+                  <Text style={[styles.sheetRowText, { color: colors.text }]}>Cancel</Text>
+                </Pressable>
+              </>
             ) : (
               <>
                 {sheetTarget ? (
@@ -1097,19 +1131,19 @@ const styles = StyleSheet.create({
   reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2, maxWidth: '78%' },
   reactionPill: {
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
   },
-  reactionPillText: { fontSize: 12 },
+  reactionPillText: { fontSize: 15 },
   sheetEmojiRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 10 },
   sheetEmojiBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sheetEmojiBtnMine: { backgroundColor: 'rgba(75, 94, 42, 0.15)' },
-  sheetEmoji: { fontSize: 26 },
+  sheetEmoji: { fontSize: 32 },
 });
