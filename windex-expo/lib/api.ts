@@ -462,7 +462,10 @@ export type ChampionshipResult = {
   season_id: string;
   group_id: string;
   player_id: string;
-  place: number;
+  /** NULL only for award-only rows (historical Socks, field size unknown — 046). */
+  place: number | null;
+  /** FJ Socks: explicit last-place award (migration 046). */
+  is_last_place: boolean;
   /** Embedded season dates for labeling (PostgREST FK embed). */
   seasons: { start_date: string; end_date: string } | null;
 };
@@ -483,7 +486,9 @@ export async function getChampionshipResults(filter: {
   try {
     const anonKey = getSupabaseAnonKey();
     const params = new URLSearchParams({
-      select: 'season_id,group_id,player_id,place,seasons(start_date,end_date)',
+      // place.asc puts NULLs last (Postgres default), so award-only Socks
+      // rows naturally sort to the end of each season's finish order.
+      select: 'season_id,group_id,player_id,place,is_last_place,seasons(start_date,end_date)',
       order: 'season_id.asc,place.asc',
     });
     if (filter.player_id) params.set('player_id', `eq.${filter.player_id}`);
@@ -498,10 +503,14 @@ export async function getChampionshipResults(filter: {
   }
 }
 
-/** Places shared by ≥2 rows (i.e. ties) within one season's rows. */
+/** Places shared by ≥2 rows (i.e. ties) within one season's rows.
+ *  NULL-place (award-only) rows join no ties. */
 export function tiedPlaces(rows: ChampionshipResult[]): Set<number> {
   const counts = new Map<number, number>();
-  for (const r of rows) counts.set(r.place, (counts.get(r.place) ?? 0) + 1);
+  for (const r of rows) {
+    if (r.place === null) continue;
+    counts.set(r.place, (counts.get(r.place) ?? 0) + 1);
+  }
   const tied = new Set<number>();
   counts.forEach((c, place) => {
     if (c > 1) tied.add(place);

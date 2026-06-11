@@ -148,7 +148,7 @@ export default function PlayerRoundsScreen() {
       .filter((r) => r.player_id === playerId)
       .map((r) => ({
         row: r,
-        tied: tiedPlaces(bySeason.get(r.season_id) ?? []).has(r.place),
+        tied: r.place !== null && tiedPlaces(bySeason.get(r.season_id) ?? []).has(r.place),
         label: seasonLabel({
           id: r.season_id,
           start_date: r.seasons?.start_date,
@@ -174,7 +174,9 @@ export default function PlayerRoundsScreen() {
               ]}
             >
               {p.row.place === 1 ? '🏆 ' : ''}
-              {ordinalPlace(p.row.place, p.tied)}
+              {p.row.place !== null ? ordinalPlace(p.row.place, p.tied) : 'Last'}
+              {/* Plain emoji for now; the teal FJ Socks SVG is the upgrade path. */}
+              {p.row.is_last_place ? ' 🧦' : ''}
             </Text>
           </View>
         ))}

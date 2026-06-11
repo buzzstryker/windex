@@ -30,6 +30,8 @@ interface DraftRow {
   key: string;
   player_id: string;
   place: number | '';
+  /** FJ Socks (last-place gag award). When checked, place becomes optional. */
+  is_last_place: boolean;
 }
 
 let _rowKeySeq = 0;
@@ -72,7 +74,8 @@ export function EditChampionshipResultsModal({
         const initialRows: DraftRow[] = existing.map((r) => ({
           key: nextKey(),
           player_id: r.player_id,
-          place: r.place,
+          place: r.place ?? '',
+          is_last_place: r.is_last_place,
         }));
         setRows(initialRows);
 
@@ -112,7 +115,16 @@ export function EditChampionshipResultsModal({
       (m, r) => (typeof r.place === 'number' && r.place > m ? r.place : m),
       0
     );
-    setRows((prev) => [...prev, { key: nextKey(), player_id: '', place: maxPlace + 1 }]);
+    setRows((prev) => [
+      ...prev,
+      { key: nextKey(), player_id: '', place: maxPlace + 1, is_last_place: false },
+    ]);
+  };
+
+  const handleToggleSocks = (key: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.key === key ? { ...r, is_last_place: !r.is_last_place } : r))
+    );
   };
 
   const handleRemoveRow = (key: string) => {
@@ -137,14 +149,17 @@ export function EditChampionshipResultsModal({
 
   const validateBeforeSave = (): { entries: FinishingOrderEntry[]; warning: string | null } | null => {
     setSaveError(null);
-    // Every row must have a player and a place.
+    // Every row needs a player. Place is required UNLESS the row carries the
+    // Socks award (historical socks winners may have an unknown place) — a
+    // row can never be both place-less and award-less (mirrors the DB CHECK).
     for (const r of rows) {
       if (!r.player_id) {
         setSaveError('Every row needs a player selected.');
         return null;
       }
-      if (r.place === '' || typeof r.place !== 'number' || r.place < 1) {
-        setSaveError('Every row needs a valid place (1 or higher).');
+      const hasPlace = r.place !== '' && typeof r.place === 'number' && r.place >= 1;
+      if (!hasPlace && !r.is_last_place) {
+        setSaveError('Every row needs a valid place (1 or higher), unless Socks 🧦 is checked.');
         return null;
       }
     }
@@ -160,9 +175,14 @@ export function EditChampionshipResultsModal({
     }
     const entries: FinishingOrderEntry[] = rows.map((r) => ({
       player_id: r.player_id,
-      place: r.place as number,
+      place: r.place === '' ? null : (r.place as number),
+      is_last_place: r.is_last_place,
     }));
-    const warning = validateStandardCompetitionRanking(entries.map((e) => e.place));
+    // Ranking sanity check runs over the placed rows only — award-only rows
+    // (place=null) have nothing to rank.
+    const warning = validateStandardCompetitionRanking(
+      entries.map((e) => e.place).filter((p): p is number => p !== null)
+    );
     return { entries, warning };
   };
 
@@ -237,13 +257,14 @@ export function EditChampionshipResultsModal({
                   <tr style={{ borderBottom: '1px solid #ddd', textAlign: 'left' }}>
                     <th style={{ padding: '6px 4px', width: 80 }}>Place</th>
                     <th style={{ padding: '6px 4px' }}>Player</th>
+                    <th style={{ padding: '6px 4px', width: 70 }}>Socks 🧦</th>
                     <th style={{ padding: '6px 4px', width: 40 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={3} style={{ padding: '14px 4px', color: '#888', fontStyle: 'italic' }}>
+                      <td colSpan={4} style={{ padding: '14px 4px', color: '#888', fontStyle: 'italic' }}>
                         No finishers yet. Click "Add finisher" to start.
                       </td>
                     </tr>
@@ -293,6 +314,16 @@ export function EditChampionshipResultsModal({
                           })}
                         </select>
                       </td>
+                      <td style={{ padding: '4px 4px', textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={r.is_last_place}
+                          onChange={() => handleToggleSocks(r.key)}
+                          disabled={busy}
+                          aria-label="FJ Socks (last-place award)"
+                          style={{ width: 16, height: 16, cursor: 'pointer' }}
+                        />
+                      </td>
                       <td style={{ padding: '4px 4px', textAlign: 'right' }}>
                         <button
                           type="button"
@@ -325,6 +356,8 @@ export function EditChampionshipResultsModal({
               <div style={hintStyle}>
                 Standard competition ranking: ties share a place; the next place skips ahead
                 (e.g. 1, 2, 2, 4, 5). The save will warn — but not block — if ranking looks off.
+                Socks 🧦 is the last-place gag award, set explicitly (never inferred); place is
+                optional for historical socks winners where the full field is unknown.
               </div>
 
               {saveError && (

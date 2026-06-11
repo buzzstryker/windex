@@ -90,7 +90,9 @@ export function CupChampions() {
     if (seasonIds.length > 0) {
       try {
         const allRows = await listChampionshipResultsForSeasons(seasonIds);
-        const filtered = allRows.filter((r) => r.place <= 3);
+        // place can be null for award-only Socks rows (046) — exclude them
+        // from top-3 (and note: in JS, null <= 3 is TRUE, so guard explicitly).
+        const filtered = allRows.filter((r) => r.place !== null && r.place <= 3);
         for (const r of filtered) {
           const arr = topThree.get(r.season_id) ?? [];
           arr.push(r);
@@ -333,9 +335,11 @@ function TopThreeList({
   rows: ChampionshipResult[];
   resolveName: (id: string | null | undefined) => string | null;
 }) {
-  // Group by place to render ties on a single line.
+  // Group by place to render ties on a single line. Callers pre-filter to
+  // placed rows, but guard anyway (place is nullable since 046).
   const byPlace = new Map<number, string[]>();
   for (const r of rows) {
+    if (r.place === null) continue;
     const name = resolveName(r.player_id) ?? r.player_id.slice(0, 8);
     const arr = byPlace.get(r.place) ?? [];
     arr.push(name);

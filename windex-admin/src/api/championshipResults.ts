@@ -26,7 +26,10 @@ export interface ChampionshipResult {
   season_id: string;
   group_id: string;
   player_id: string;
-  place: number;
+  /** NULL only for award-only rows (historical socks, field size unknown). */
+  place: number | null;
+  /** FJ Socks: explicit last-place award (migration 046). */
+  is_last_place: boolean;
 }
 
 /**
@@ -37,7 +40,7 @@ export async function listChampionshipResults(seasonId: string): Promise<Champio
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/championship_results` +
     `?season_id=eq.${encodeURIComponent(seasonId)}` +
-    `&select=id,season_id,group_id,player_id,place` +
+    `&select=id,season_id,group_id,player_id,place,is_last_place` +
     `&order=place.asc,created_at.asc`,
     { headers: restHeaders() }
   );
@@ -60,7 +63,7 @@ export async function listChampionshipResultsForSeasons(
   const res = await fetch(
     `${SUPABASE_URL}/rest/v1/championship_results` +
     `?season_id=in.(${inList})` +
-    `&select=id,season_id,group_id,player_id,place` +
+    `&select=id,season_id,group_id,player_id,place,is_last_place` +
     `&order=season_id.asc,place.asc,created_at.asc`,
     { headers: restHeaders() }
   );
@@ -73,7 +76,9 @@ export async function listChampionshipResultsForSeasons(
 
 export interface FinishingOrderEntry {
   player_id: string;
-  place: number;
+  /** NULL allowed only when is_last_place (CHECK championship_results_place_or_award). */
+  place: number | null;
+  is_last_place: boolean;
 }
 
 /**
@@ -126,6 +131,7 @@ export async function replaceFinishingOrder(
     group_id: groupId,
     player_id: e.player_id,
     place: e.place,
+    is_last_place: e.is_last_place,
   }));
   const insRes = await fetch(
     `${SUPABASE_URL}/rest/v1/championship_results`,

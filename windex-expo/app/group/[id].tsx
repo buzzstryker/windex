@@ -348,7 +348,9 @@ export default function GroupDetailScreen() {
                     ? winners.map((w) => resolveName(w.player_id) ?? '\u2014').join(' & ')
                     : resolveName(si.season.cup_champion_player_id);
                 const pointsWinnerName = si.pointsWinner ? resolveName(si.pointsWinner.player_id) : null;
-                const expandable = champRows.some((r) => r.place > 1);
+                // Anything beyond a lone winner row (lower places OR an
+                // award-only Socks row) makes the card expandable.
+                const expandable = champRows.some((r) => r.place !== 1);
                 const expanded = expandable && expandedChamps.has(si.season.id);
                 const tied = tiedPlaces(champRows);
                 return (
@@ -387,7 +389,9 @@ export default function GroupDetailScreen() {
                           <View key={r.player_id} style={styles.champOrderRow}>
                             <Text style={styles.champOrderPlace}>
                               {r.place === 1 ? '\ud83c\udfc6 ' : ''}
-                              {ordinalPlace(r.place, tied.has(r.place))}
+                              {r.place !== null ? ordinalPlace(r.place, tied.has(r.place)) : 'Last'}
+                              {/* Plain emoji for now; teal FJ Socks SVG is the upgrade path. */}
+                              {r.is_last_place ? ' \ud83e\udde6' : ''}
                             </Text>
                             <Text style={styles.champOrderName} numberOfLines={1}>
                               {resolveName(r.player_id) ?? '\u2014'}
