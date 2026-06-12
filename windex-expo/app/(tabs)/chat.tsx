@@ -775,43 +775,69 @@ export default function ChatScreen() {
           </Pressable>
           {pills.length > 0 ? (
             <View style={styles.reactionRow}>
-              {pills.map((p) => (
-                <Pressable
-                  key={p.emoji}
-                  // Adding is one tap; removing is deliberate — tapping (or
-                  // long-pressing) a pill I've reacted with opens the sheet
-                  // directly in remove-confirm mode for that emoji.
-                  onPress={() => {
-                    if (p.mine) {
-                      setConfirmDelete(false);
-                      setConfirmRemoveEmoji(p.emoji);
-                      setSheetTarget(item);
-                    } else {
-                      void toggleReaction(item.id, p.emoji, false);
+              {pills.map((p) => {
+                // iMessage-style stack: no count; one emoji per reactor,
+                // each subsequent copy peeking ~7px out from BEHIND the
+                // previous (zIndex descends), capped at 3 visible layers.
+                const layers = Math.min(p.count, 3);
+                return (
+                  <Pressable
+                    key={p.emoji}
+                    // Adding is one tap; removing is deliberate — tapping (or
+                    // long-pressing) a pill I've reacted with opens the sheet
+                    // directly in remove-confirm mode for that emoji.
+                    onPress={() => {
+                      if (p.mine) {
+                        setConfirmDelete(false);
+                        setConfirmRemoveEmoji(p.emoji);
+                        setSheetTarget(item);
+                      } else {
+                        void toggleReaction(item.id, p.emoji, false);
+                      }
+                    }}
+                    onLongPress={
+                      p.mine
+                        ? () => {
+                            setConfirmDelete(false);
+                            setConfirmRemoveEmoji(p.emoji);
+                            setSheetTarget(item);
+                          }
+                        : undefined
                     }
-                  }}
-                  onLongPress={
-                    p.mine
-                      ? () => {
-                          setConfirmDelete(false);
-                          setConfirmRemoveEmoji(p.emoji);
-                          setSheetTarget(item);
-                        }
-                      : undefined
-                  }
-                  style={[
-                    styles.reactionPill,
-                    {
-                      backgroundColor: isDark ? colors.card : '#FFFFFF',
-                      borderColor: p.mine ? OLIVE : isDark ? colors.border : '#D0D0D0',
-                    },
-                  ]}
-                >
-                  <Text style={[styles.reactionPillText, p.mine && { color: OLIVE, fontWeight: '600' }]}>
-                    {p.emoji} {p.count}
-                  </Text>
-                </Pressable>
-              ))}
+                    style={[
+                      styles.reactionPill,
+                      // Olive tint + outline marks "this contains my reaction
+                      // — tap to remove"; others stay on the plain card/white.
+                      p.mine
+                        ? {
+                            backgroundColor: isDark
+                              ? 'rgba(75, 94, 42, 0.35)'
+                              : 'rgba(75, 94, 42, 0.15)',
+                            borderColor: OLIVE,
+                          }
+                        : {
+                            backgroundColor: isDark ? colors.card : '#FFFFFF',
+                            borderColor: isDark ? colors.border : '#D0D0D0',
+                          },
+                    ]}
+                  >
+                    <View style={styles.emojiStack}>
+                      {Array.from({ length: layers }, (_, i) => (
+                        <Text
+                          key={i}
+                          style={[
+                            styles.stackEmoji,
+                            i > 0 && styles.stackEmojiBehind,
+                            { zIndex: layers - i },
+                          ]}
+                        >
+                          {p.emoji}
+                        </Text>
+                      ))}
+                    </View>
+                  </Pressable>
+                );
+              })}
             </View>
           ) : null}
           <Text style={[styles.time, { color: colors.icon }]}>{formatTime(item.created_at)}</Text>
@@ -1132,11 +1158,18 @@ const styles = StyleSheet.create({
   reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2, maxWidth: '78%' },
   reactionPill: {
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 12,
+    borderRadius: 18,
+    paddingHorizontal: 10,
     paddingVertical: 4,
+    // Emoji glyphs can overshoot their line box; never clip at the pill edge.
+    overflow: 'visible',
   },
-  reactionPillText: { fontSize: 24 },
+  emojiStack: { flexDirection: 'row', alignItems: 'center' },
+  // Fixed 30px slot per 24pt emoji so the overlap step is deterministic
+  // regardless of glyph width; lineHeight 30 keeps tall glyphs unclipped.
+  stackEmoji: { fontSize: 24, lineHeight: 30, width: 30, textAlign: 'center' },
+  // -23 against the 30px slot = each layer peeks 7px out behind the previous.
+  stackEmojiBehind: { marginLeft: -23 },
   sheetEmojiRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 10 },
   sheetEmojiBtn: {
     width: 60,
