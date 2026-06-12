@@ -851,7 +851,7 @@ export default function ChatScreen() {
             onEndReachedThreshold={0.3}
             ListEmptyComponent={
               <View style={styles.center}>
-                <Text style={{ color: colors.icon }}>No messages yet. Say hello.</Text>
+                <Text style={{ color: colors.icon, fontSize: 18 }}>No messages yet. Say hello.</Text>
               </View>
             }
             ListFooterComponent={
@@ -1031,7 +1031,7 @@ const styles = StyleSheet.create({
   row: { width: '100%' },
   rowMine: { alignItems: 'flex-end' },
   rowOther: { alignItems: 'flex-start' },
-  authorLabel: { fontSize: 12, fontWeight: '600', marginBottom: 2, marginLeft: 12 },
+  authorLabel: { fontSize: 16, fontWeight: '600', marginBottom: 2, marginLeft: 12 },
   bubble: {
     maxWidth: '78%',
     borderRadius: 18,
@@ -1041,12 +1041,12 @@ const styles = StyleSheet.create({
   bubbleMine: { backgroundColor: OLIVE },
   // Image fills to the bubble radius; caption re-adds its own padding.
   bubbleWithImage: { paddingVertical: 0, paddingHorizontal: 0, overflow: 'hidden' },
-  bubbleText: { fontSize: 19, lineHeight: 25 },
+  bubbleText: { fontSize: 25, lineHeight: 33 },
   bubbleTextMine: { color: '#FFFFFF' },
   captionPad: { paddingVertical: 8, paddingHorizontal: 12 },
-  time: { fontSize: 10, fontWeight: '400', marginTop: 2, marginHorizontal: 12 },
+  time: { fontSize: 13, fontWeight: '400', marginTop: 2, marginHorizontal: 12 },
   olderSpinner: { paddingVertical: 12 },
-  error: { textAlign: 'center', paddingVertical: 6, fontSize: 13 },
+  error: { textAlign: 'center', paddingVertical: 6, fontSize: 17 },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -1064,28 +1064,29 @@ const styles = StyleSheet.create({
   },
   input: {
     width: '100%',
-    maxHeight: 120,
-    minHeight: 40,
+    maxHeight: 150,
+    minHeight: 48,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 20,
+    borderRadius: 24,
     paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 10,
-    fontSize: 19, // >=16px: iOS auto-zooms on focusing an input under 16px; that
+    paddingTop: 9,
+    paddingBottom: 9,
+    fontSize: 25, // >=16px: iOS auto-zooms on focusing an input under 16px; that
                   // zoom (not any offset math) is what shoved the composer off-screen.
+    lineHeight: 30,
   },
-  send: { flexShrink: 0, borderRadius: 20, paddingHorizontal: 18, height: 40, alignItems: 'center', justifyContent: 'center' },
-  sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
+  send: { flexShrink: 0, borderRadius: 24, paddingHorizontal: 18, height: 48, alignItems: 'center', justifyContent: 'center' },
+  sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 20 },
 
   /* Photo attachment */
   attachBtn: {
     flexShrink: 0,
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  attachIcon: { fontSize: 22 },
+  attachIcon: { fontSize: 29 },
   pendingWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1105,7 +1106,7 @@ const styles = StyleSheet.create({
     marginLeft: -20,
     marginTop: -40,
   },
-  pendingCancelText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
+  pendingCancelText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   lightboxWrap: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.92)',
@@ -1122,10 +1123,10 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingHorizontal: 16,
   },
-  sheetTitle: { fontSize: 15, fontWeight: '600', textAlign: 'center', paddingVertical: 10 },
+  sheetTitle: { fontSize: 20, fontWeight: '600', textAlign: 'center', paddingVertical: 10 },
   sheetRow: { paddingVertical: 14, alignItems: 'center' },
-  sheetRowText: { fontSize: 16, fontWeight: '500' },
-  sheetDestructive: { fontSize: 16, fontWeight: '600', color: '#D32F2F' },
+  sheetRowText: { fontSize: 21, fontWeight: '500' },
+  sheetDestructive: { fontSize: 21, fontWeight: '600', color: '#D32F2F' },
 
   /* Reactions */
   reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2, maxWidth: '78%' },
@@ -1135,15 +1136,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
   },
-  reactionPillText: { fontSize: 18 },
+  reactionPillText: { fontSize: 24 },
   sheetEmojiRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 10 },
   sheetEmojiBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sheetEmojiBtnMine: { backgroundColor: 'rgba(75, 94, 42, 0.15)' },
-  sheetEmoji: { fontSize: 32 },
+  sheetEmoji: { fontSize: 42 },
 });
