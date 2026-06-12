@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { Feather } from '@expo/vector-icons';
 import { Image as ExpoImage } from 'expo-image';
 
 import { Header } from '@/components/Header';
@@ -920,8 +921,16 @@ export default function ChatScreen() {
           ]}
         >
           {Platform.OS === 'web' ? (
-            <Pressable onPress={pickImage} disabled={sending} style={styles.attachBtn} hitSlop={4}>
-              <Text style={styles.attachIcon}>📷</Text>
+            <Pressable
+              onPress={pickImage}
+              disabled={sending}
+              style={styles.attachBtn}
+              hitSlop={4}
+              accessibilityLabel="Attach a photo"
+            >
+              {/* Feather 'image' (photos-library glyph): the button picks an
+                  existing image, so the library glyph beats a camera emoji. */}
+              <Feather name="image" size={24} color={colors.icon} />
             </Pressable>
           ) : null}
           <View style={styles.inputWrap}>
@@ -1105,6 +1114,7 @@ const styles = StyleSheet.create({
   sendText: { color: '#FFFFFF', fontWeight: '600', fontSize: 20 },
 
   /* Photo attachment */
+  // 48px tall to match the post-font-bump composer controls; centers the icon.
   attachBtn: {
     flexShrink: 0,
     width: 44,
@@ -1112,7 +1122,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  attachIcon: { fontSize: 29 },
   pendingWrap: {
     flexDirection: 'row',
     alignItems: 'center',

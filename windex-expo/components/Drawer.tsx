@@ -182,7 +182,8 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
             <View style={[styles.separator, { backgroundColor: colors.border, marginBottom: 12 }]} />
             <Text style={[styles.userName, { color: textColor }]}>{userName || 'Player'}</Text>
             <Text style={[styles.userEmail, { color: mutedColor }]}>{userEmail || ''}</Text>
-            <Text style={[styles.buildId, { color: mutedColor }]}>build {BUILD_ID}</Text>
+            {/* App name in the stamp so Windex and Honcut builds can't be confused. */}
+            <Text style={[styles.buildId, { color: mutedColor }]}>Windex {BUILD_ID}</Text>
           </View>
         </View>
       </View>
