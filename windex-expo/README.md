@@ -7,6 +7,7 @@ Expo app for Late Add Golf v2 — web (Vercel), iOS, and Android via Expo Go.
 - **Production:** https://windexgolf.com (Vercel, auto-deploys from `master`). `app.lateaddgolf.com` 308-redirects here for legacy bookmarks.
 - **Vercel root directory:** `windex-expo/`
 - **Build:** `npx expo export --platform web` → outputs to `dist/`
+- **Deploy-skip trap:** `vercel.json`'s `ignoreCommand` (`git diff --quiet HEAD^ HEAD -- .`) only inspects the push's **HEAD commit**. A multi-commit push whose *last* commit doesn't touch `windex-expo/` (e.g. app fix followed by a root-level docs commit) gets **Canceled** and the app changes underneath never deploy — `vercel redeploy` re-runs the ignore command and cancels again. Keep app-code commits last in a push, or follow up with any commit that touches this directory.
 
 ## Authentication
 
