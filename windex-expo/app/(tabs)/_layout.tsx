@@ -9,9 +9,11 @@ import { ChatUnreadProvider, useChatUnread } from '@/contexts/ChatUnreadContext'
 import { RoundsUnreadProvider, useRoundsUnread } from '@/contexts/RoundsUnreadContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-/** Dot-sized tabBarBadge style shared by the Chat and Rounds unread dots. */
+/** Dot-sized tabBarBadge style shared by the Chat and Rounds unread dots.
+ *  iOS-system notification red — #D32F2F read near-black at 10px on the dark
+ *  tab bar. Matches the nav theme's notification fallback (#FF3B30). */
 const BADGE_DOT_STYLE = {
-  backgroundColor: '#D32F2F',
+  backgroundColor: '#FF3B30',
   minWidth: 10,
   maxWidth: 10,
   height: 10,
