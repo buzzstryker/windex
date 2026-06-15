@@ -21,16 +21,6 @@ import {
 
 const OLIVE = '#4B5E2A';
 
-function getCurrentUserId(): string | null {
-  // Extract from stored JWT — we'll get it from the auth persistence
-  try {
-    // This is a simplified version; in production use the auth context
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export default function GroupMembersScreen() {
   const { group_id, group_name } = useLocalSearchParams<{ group_id: string; group_name?: string }>();
   const insets = useSafeAreaInsets();
@@ -81,40 +71,18 @@ export default function GroupMembersScreen() {
 
   const handleSave = async () => {
     if (!editMember) return;
+    // display_name is the required nickname (players.display_name is NOT NULL);
+    // block an empty/whitespace save rather than write a blank name.
+    if (!editDisplayName.trim()) { setSaveMsg('Display name is required'); return; }
     setSaving(true);
     setSaveMsg(null);
     try {
-      // We need the user_id for the player update. Since we're the data owner,
-      // get it from the JWT. For simplicity, we'll try updating and see if RLS allows it.
-      const tokenRaw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('late_add_mobile_jwt') : null;
-      let userId = '';
-      if (tokenRaw) {
-        try { userId = JSON.parse(atob(tokenRaw.split('.')[1])).sub; } catch {}
-      }
-      // Try localStorage too (web auth persistence)
-      if (!userId && typeof localStorage !== 'undefined') {
-        const stored = localStorage.getItem('late_add_mobile_jwt');
-        if (stored) {
-          try { userId = JSON.parse(atob(stored.split('.')[1])).sub; } catch {}
-        }
-        // Also check Supabase session
-        if (!userId) {
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key && key.includes('supabase') && key.includes('auth')) {
-              try {
-                const val = JSON.parse(localStorage.getItem(key) ?? '');
-                if (val?.access_token) {
-                  userId = JSON.parse(atob(val.access_token.split('.')[1])).sub;
-                  break;
-                }
-              } catch {}
-            }
-          }
-        }
-      }
-
-      const playerOk = await updatePlayerRest(editMember.player_id, userId, {
+      // RLS (players_update, migration 015) authorizes the write: the owning
+      // auth user can edit their own row, a super admin can edit any row. The
+      // request carries the current session token, so no client-side user_id
+      // is needed — the old storage-scraping derived it from the wrong key and
+      // produced silent no-op saves.
+      const playerOk = await updatePlayerRest(editMember.player_id, {
         display_name: editDisplayName,
         full_name: editFullName || null,
         venmo_handle: editVenmo || null,

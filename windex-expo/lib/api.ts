@@ -197,20 +197,40 @@ export async function listGroupMembers(groupId: string): Promise<MemberWithPlaye
   }
 }
 
-export async function updatePlayerRest(playerId: string, userId: string, updates: Record<string, unknown>): Promise<boolean> {
+/**
+ * PATCH a players row by id, authenticated as the current user (the access
+ * token from AuthContext). Authorization is enforced by RLS (`players_update`,
+ * migration 015): the owning auth user can update their own row, a super admin
+ * can update any row.
+ *
+ * The previous `&user_id=eq.<userId>` URL filter was redundant with RLS and
+ * actively harmful: callers had to re-derive the user_id (group-members.tsx
+ * scraped it out of storage under the wrong key), and when that produced an
+ * empty/incorrect value the filter matched ZERO rows. PostgREST then returns
+ * 2xx for a no-op update, so the UI reported "Saved" while nothing persisted —
+ * a silent self-edit failure. Drop the filter and let RLS do the gating (this
+ * mirrors the same fix already applied to windex-admin's updatePlayer).
+ *
+ * Returns true only when at least one row was actually updated, so a no-op can
+ * never be mistaken for a successful save.
+ */
+export async function updatePlayerRest(playerId: string, updates: Record<string, unknown>): Promise<boolean> {
   const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
   const token = await getAccessToken();
   if (!base || !token) return false;
   const anonKey = getSupabaseAnonKey();
   const res = await fetch(
-    `${base}/rest/v1/players?id=eq.${encodeURIComponent(playerId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    `${base}/rest/v1/players?id=eq.${encodeURIComponent(playerId)}`,
     {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: anonKey || token, Prefer: 'return=minimal' },
+      // return=representation so we can confirm a row actually changed.
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: anonKey || token, Prefer: 'return=representation' },
       body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
     }
   );
-  return res.ok;
+  if (!res.ok) return false;
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 export async function updateMembershipRest(membershipId: string, updates: Record<string, unknown>): Promise<boolean> {
