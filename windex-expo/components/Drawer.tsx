@@ -219,5 +219,5 @@ const styles = StyleSheet.create({
   userSection: {},
   userName: { fontSize: 15, fontWeight: '600' },
   userEmail: { fontSize: 13, marginTop: 2 },
-  buildId: { fontSize: 11, marginTop: 6, opacity: 0.7 },
+  buildId: { fontSize: 16, fontWeight: '500', marginTop: 6 },
 });
