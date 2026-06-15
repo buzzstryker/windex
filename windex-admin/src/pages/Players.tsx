@@ -10,6 +10,7 @@ import { isCurrentUserSuperAdmin, listGroups } from '../api/groups';
 import {
   listPlayersWithMembership, updatePlayer, updateMembership,
   sendInvite, PlayerAlreadyLinkedError,
+  adminUpdateUserEmail,
   getPlayersAuthStatus,
   type PlayerWithMembership, type PlayerAuthStatus,
 } from '../api/playerAdmin';
@@ -151,10 +152,11 @@ export function Players() {
     setSaving(true);
     setSaveMsg(null);
     try {
+      // Non-email player fields. Email is handled separately below because it
+      // is the OTP login identity, not just a column.
       await updatePlayer(p.id, {
         display_name: fields.display_name,
         full_name: fields.full_name || null,
-        email: fields.email || null,
         venmo_handle: fields.venmo_handle || null,
         is_active: fields.is_active,
       });
@@ -162,9 +164,26 @@ export function Players() {
         role: fields.role,
         is_active: fields.is_active,
       });
+
+      // Email change: route a LINKED player through admin-update-user-email so
+      // auth.users.email changes too (and players.email is synced across all of
+      // that user's rows). A not-yet-invited player has no login identity, so
+      // just write the players.email column directly. Real function errors
+      // (403 / 404 / 409 / invalid email) surface via the catch below.
+      const newEmail = fields.email.trim();
+      const oldEmail = (p.email ?? '').trim();
+      if (newEmail !== oldEmail) {
+        if (p.user_id) {
+          await adminUpdateUserEmail(p.id, newEmail);
+        } else {
+          await updatePlayer(p.id, { email: newEmail || null });
+        }
+      }
+
       setSaveMsg('Saved');
       setEditingId(null);
       load();
+      loadAuthStatus();
     } catch (e) {
       setSaveMsg(e instanceof Error ? e.message : 'Save failed');
     } finally {

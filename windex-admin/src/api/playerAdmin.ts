@@ -159,6 +159,48 @@ export async function updateMembership(
 }
 
 // =============================================================================
+// admin-update-user-email Edge Function
+// =============================================================================
+
+export interface AdminUpdateUserEmailResponse {
+  ok: true;
+  user_id: string;
+  email: string;
+  /** Number of players rows whose email mirror was synced (a user can have several). */
+  players_synced: number;
+}
+
+/**
+ * POST /admin-update-user-email — super-admin only (gated server-side via the
+ * am_i_super_admin() RPC). Changes the TARGET player's auth login identity
+ * (auth.users.email, email_confirm:true so it's immediate) and syncs
+ * players.email across every row for that auth user. Use this — NOT a plain
+ * players.email PATCH — whenever a LINKED player's email changes, because the
+ * email is their OTP login identity.
+ *
+ * Surfaces the function's real errors. The shared apiFetch rewrites any 404
+ * into a generic "endpoint not implemented" message, so we recover the
+ * function's true error (e.g. "Player not found") from the parsed body.
+ */
+export async function adminUpdateUserEmail(
+  playerId: string,
+  email: string
+): Promise<AdminUpdateUserEmailResponse> {
+  try {
+    return await apiFetch<AdminUpdateUserEmailResponse>('/admin-update-user-email', {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId, email }),
+    });
+  } catch (e) {
+    if (e instanceof ApiError) {
+      const real = (e.body as { error?: string } | undefined)?.error;
+      if (real) throw new ApiError(e.status, real, e.body, e.path);
+    }
+    throw e;
+  }
+}
+
+// =============================================================================
 // invite-player Edge Function
 // =============================================================================
 
