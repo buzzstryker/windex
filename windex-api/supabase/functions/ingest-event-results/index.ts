@@ -93,6 +93,20 @@ serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
+
+  // Reject future-dated rounds. "Today" is evaluated in Pacific time (league locale) rather than
+  // UTC, so a round entered on a Pacific evening that is already "tomorrow" in UTC is not falsely
+  // rejected. round_date is a "YYYY-MM-DD" ISO date string, so a lexical comparison is correct.
+  const pacificToday = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+  }).format(new Date()); // -> "YYYY-MM-DD"
+  if (round_date > pacificToday) {
+    return new Response(
+      JSON.stringify({ error: "round_date cannot be in the future" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
   const hasExternalId = source_app != null && source_app !== "" && external_event_id != null && external_event_id !== "";
 
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
