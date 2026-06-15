@@ -32,8 +32,10 @@ function formatDateDisplay(d: Date): string {
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
 }
 
+// Build a "YYYY-MM-DD" string from LOCAL date components. Using toISOString() here would
+// coerce to UTC and drift the default to "tomorrow" when entered on a Pacific evening.
 function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
@@ -139,7 +141,11 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
     const v = scores[pid];
     return v !== undefined && v !== '' && !isNaN(parseFloat(v));
   });
-  const isValid = dateText && selectedPlayers.size >= 2 && allScoresFilled
+  // "Today" from LOCAL components; round_date is a YYYY-MM-DD string so a lexical compare is correct.
+  // Mirrors the authoritative Pacific-aware guard in the ingest-event-results edge function.
+  const today = toISODate(new Date());
+  const isFutureDate = dateText > today;
+  const isValid = dateText && !isFutureDate && selectedPlayers.size >= 2 && allScoresFilled
     && (!tournament || (buyInNum > 0 && poolBalanced));
 
   const handleDateChange = (text: string) => {
@@ -150,6 +156,11 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
 
   const handleSubmit = useCallback(async () => {
     if (!isValid || !selectedGroup || !selectedSeason) return;
+    // Backstop: never submit a future-dated round, even if state slipped past the inline guard.
+    if (dateText > toISODate(new Date())) {
+      setError('Round date cannot be in the future');
+      return;
+    }
     setSubmitting(true);
     setError(null);
 
@@ -217,6 +228,9 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
                 keyboardType="default"
               />
               <Text style={styles.datePreview}>{formatDateDisplay(date)}</Text>
+              {isFutureDate && (
+                <Text style={styles.dateError}>Round date cannot be in the future</Text>
+              )}
 
               {/* Season (read-only) */}
               {selectedSeason && (
@@ -379,6 +393,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAFAFA',
   },
   datePreview: { fontSize: 12, color: OLIVE, fontWeight: '600', marginTop: 4, marginLeft: 2 },
+  dateError: { fontSize: 12, color: '#C62828', fontWeight: '600', marginTop: 4, marginLeft: 2 },
 
   seasonBadge: {
     alignSelf: 'flex-start', backgroundColor: '#F0F4E8',

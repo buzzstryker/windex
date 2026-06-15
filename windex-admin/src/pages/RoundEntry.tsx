@@ -28,6 +28,11 @@ export function RoundEntry() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // "Today" from LOCAL date components (not toISOString, which is UTC); used to cap the date picker.
+  // The ingest-event-results edge function is the authoritative Pacific-aware guard; this mirrors it.
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
   useEffect(() => {
     listGroups()
       .then(setGroups)
@@ -106,7 +111,7 @@ export function RoundEntry() {
               ))}
             </select>
             <label style={{ marginTop: 12 }}>Played date (required)</label>
-            <input type="date" value={roundDate} onChange={(e) => setRoundDate(e.target.value)} required />
+            <input type="date" max={today} value={roundDate} onChange={(e) => setRoundDate(e.target.value)} required />
           </FormSection>
           <FormSection title="Players &amp; points">
             <p style={{ fontSize: 12, color: '#666' }}>Source app is set to &quot;manual&quot;. Enter awarded point totals per player (not golf scorecard data). {players.length > 0 ? 'Select players from the group or enter a player ID.' : 'Enter player IDs and points.'}</p>

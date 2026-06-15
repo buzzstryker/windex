@@ -25,6 +25,11 @@ export function RoundEdit() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // "Today" from LOCAL date components (not toISOString, which is UTC); used to cap the date picker.
+  // The ingest-event-results edge function is the authoritative Pacific-aware guard; this mirrors it.
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
   useEffect(() => {
     if (!eventId) return;
     getEvent(eventId)
@@ -90,7 +95,7 @@ export function RoundEdit() {
           <FormSection title="Event metadata">
             <p style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Current values are loaded from the event; changes are corrections. Standings are derived from the ledger after save.</p>
             <label>Played date</label>
-            <input type="date" value={roundDate} onChange={(e) => setRoundDate(e.target.value)} />
+            <input type="date" max={today} value={roundDate} onChange={(e) => setRoundDate(e.target.value)} />
             <label style={{ marginTop: 12 }}>Season (optional)</label>
             {seasons.length > 0 ? (
               <select value={seasonId} onChange={(e) => setSeasonId(e.target.value)} style={{ maxWidth: 400 }}>
