@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 
 import { getSupabaseAnonKey, getSupabaseUrl, hasSupabaseAuthConfig } from '@/lib/config';
 import { setAccessTokenGetter, setOnUnauthorized } from '@/lib/api';
+import { friendlyAuthError } from '@/lib/authErrors';
 import { authPersistence } from '@/lib/authPersistence';
 import { setRealtimeAuth } from '@/lib/supabase';
 
@@ -104,7 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: email.trim(),
         options: { shouldCreateUser: false, emailRedirectTo: undefined },
       });
-      if (error) return { error: error.message };
+      if (error) return { error: friendlyAuthError(error) };
       return { error: null };
     },
     [supabase]
@@ -118,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         token: token.trim(),
         type: 'email',
       });
-      if (error) return { error: error.message };
+      if (error) return { error: friendlyAuthError(error) };
       // Session is established — onAuthStateChange will fire SIGNED_IN
       return { error: null };
     },
