@@ -44,9 +44,10 @@ export function CupChampions() {
   // including the season's cup_champion_player_id fallback and any
   // ex-member ids from championship_results.
   const [playerNames, setPlayerNames] = useState<Map<string, PlayerNames>>(new Map());
-  // championship_results grouped by season_id, places 1-3 only (rendered inline).
-  // Stored as a per-season ordered array so ties at a given place stay together.
-  const [topThreeBySeason, setTopThreeBySeason] = useState<Map<string, ChampionshipResult[]>>(new Map());
+  // championship_results grouped by season_id — the full finishing order.
+  // Stored as a per-season ordered array (place asc, created_at asc; award-only
+  // Socks rows last) so ties at a given place stay together on render.
+  const [resultsBySeason, setResultsBySeason] = useState<Map<string, ChampionshipResult[]>>(new Map());
   const [candidates, setCandidates] = useState<CupChampionCandidate[]>([]);
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,6 +57,19 @@ export function CupChampions() {
   const [toast, setToast] = useState<string | null>(null);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  // Show past + current + exactly the single coming season (the future row
+  // with the smallest start_date). Hides the decades of far-future rows the
+  // season-rollover cron over-projects (tracked separately in BACKLOG).
+  const comingSeasonId = useMemo(() => {
+    const futures = seasons.filter((s) => seasonStatus(s, today) === 'future');
+    if (futures.length === 0) return null;
+    return futures.reduce((earliest, s) => (s.start_date < earliest.start_date ? s : earliest)).id;
+  }, [seasons, today]);
+  const visibleSeasons = useMemo(
+    () => seasons.filter((s) => seasonStatus(s, today) !== 'future' || s.id === comingSeasonId),
+    [seasons, today, comingSeasonId],
+  );
 
   // Initial load: gate, groups, default group selection.
   useEffect(() => {
@@ -82,29 +96,27 @@ export function CupChampions() {
     const sorted = [...list].sort((a, b) => b.start_date.localeCompare(a.start_date));
     setSeasons(sorted);
 
-    // Pull championship_results across all seasons in one shot; keep only
-    // top-3 placements for the inline list view.
+    // Pull the full championship_results set across all seasons in one shot.
+    // Rows arrive ordered (season_id, place asc, created_at asc) with award-only
+    // Socks rows (place=null) last within each season — see the render list.
     const seasonIds = sorted.map((s) => s.id);
-    let topThree = new Map<string, ChampionshipResult[]>();
+    let results = new Map<string, ChampionshipResult[]>();
     let allResultIds: string[] = [];
     if (seasonIds.length > 0) {
       try {
         const allRows = await listChampionshipResultsForSeasons(seasonIds);
-        // place can be null for award-only Socks rows (046) — exclude them
-        // from top-3 (and note: in JS, null <= 3 is TRUE, so guard explicitly).
-        const filtered = allRows.filter((r) => r.place !== null && r.place <= 3);
-        for (const r of filtered) {
-          const arr = topThree.get(r.season_id) ?? [];
+        for (const r of allRows) {
+          const arr = results.get(r.season_id) ?? [];
           arr.push(r);
-          topThree.set(r.season_id, arr);
+          results.set(r.season_id, arr);
         }
-        allResultIds = filtered.map((r) => r.player_id);
+        allResultIds = allRows.map((r) => r.player_id);
       } catch {
         // Soft-fail: list view still renders the per-season champion fallback.
-        topThree = new Map();
+        results = new Map();
       }
     }
-    setTopThreeBySeason(topThree);
+    setResultsBySeason(results);
 
     // Resolve names for: every top-3 player_id + every legacy
     // cup_champion_player_id (covers seasons with no results rows yet).
@@ -188,7 +200,7 @@ export function CupChampions() {
 
         {!selectedGroup ? (
           <EmptyState message="No groups available." />
-        ) : seasons.length === 0 ? (
+        ) : visibleSeasons.length === 0 ? (
           <EmptyState message={`No seasons for ${selectedGroup.name} yet.`} />
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -196,15 +208,15 @@ export function CupChampions() {
               <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
                 <th style={th}>Season</th>
                 <th style={th}>Status</th>
-                <th style={th}>Top 3</th>
+                <th style={th}>Finishing Order</th>
                 <th style={th}></th>
               </tr>
             </thead>
             <tbody>
-              {seasons.map((s) => {
+              {visibleSeasons.map((s) => {
                 const status = seasonStatus(s, today);
-                const topThree = topThreeBySeason.get(s.id) ?? [];
-                const championFallback = topThree.length === 0
+                const results = resultsBySeason.get(s.id) ?? [];
+                const championFallback = results.length === 0
                   ? resolveName(s.cup_champion_player_id ?? null)
                   : null;
                 const rowStyle: React.CSSProperties = {
@@ -224,14 +236,14 @@ export function CupChampions() {
                       <StatusBadge status={status} />
                     </td>
                     <td style={td}>
-                      {topThree.length > 0 ? (
-                        <TopThreeList rows={topThree} resolveName={resolveName} />
+                      {results.length > 0 ? (
+                        <FinishingOrderList rows={results} resolveName={resolveName} />
                       ) : championFallback ? (
                         <span style={{ fontSize: 13 }}>
                           <strong>1.</strong> {championFallback}
                         </span>
                       ) : (
-                        <span style={{ fontStyle: 'italic', color: '#999' }}>(no results)</span>
+                        <span style={{ fontStyle: 'italic', color: '#999' }}>No results recorded yet</span>
                       )}
                     </td>
                     <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -325,24 +337,32 @@ function StatusBadge({ status }: { status: SeasonStatus }) {
 }
 
 /**
- * Renders the top-3 column. Rows are already ordered by (place, created_at).
- * Ties at a given place are listed on the same line.
+ * Renders the full finishing order for a season. Rows arrive ordered by
+ * (place asc, created_at asc) with award-only Socks rows (place=null) last.
+ * Ties at a given place are listed on the same line; any is_last_place row
+ * gets a 🧦, and award-only Socks winners (no place) render as a separate
+ * line below the placed rows.
  */
-function TopThreeList({
+function FinishingOrderList({
   rows,
   resolveName,
 }: {
   rows: ChampionshipResult[];
   resolveName: (id: string | null | undefined) => string | null;
 }) {
-  // Group by place to render ties on a single line. Callers pre-filter to
-  // placed rows, but guard anyway (place is nullable since 046).
+  // Placed rows grouped by place (ties share a line); award-only Socks rows
+  // (place=null && is_last_place) collected for a trailing line.
   const byPlace = new Map<number, string[]>();
+  const socksOnly: string[] = [];
   for (const r of rows) {
-    if (r.place === null) continue;
     const name = resolveName(r.player_id) ?? r.player_id.slice(0, 8);
+    if (r.place === null) {
+      if (r.is_last_place) socksOnly.push(name);
+      continue;
+    }
+    const label = r.is_last_place ? `${name} 🧦` : name;
     const arr = byPlace.get(r.place) ?? [];
-    arr.push(name);
+    arr.push(label);
     byPlace.set(r.place, arr);
   }
   const places = Array.from(byPlace.keys()).sort((a, b) => a - b);
@@ -352,6 +372,9 @@ function TopThreeList({
         <div key={p}>
           <strong>{p}.</strong> {byPlace.get(p)!.join(', ')}
         </div>
+      ))}
+      {socksOnly.map((name, i) => (
+        <div key={`socks-${i}`}>🧦 {name}</div>
       ))}
     </div>
   );
