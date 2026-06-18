@@ -82,71 +82,62 @@ export interface FinishingOrderEntry {
 }
 
 /**
- * Replace the entire finishing order for a season:
- *   1. DELETE every championship_results row for the season.
- *   2. INSERT the new rows.
+ * Thrown when a request is rejected because the admin's JWT has expired
+ * (PostgREST 401 / code PGRST301). Distinct from a generic save failure so
+ * the UI can show a re-authenticate affordance instead of the raw PostgREST
+ * "JWT expired" string. See replaceFinishingOrder and the BACKLOG item on
+ * the admin's access-token-only session (no refresh today).
+ */
+export class AuthExpiredError extends Error {
+  constructor(message = 'Your session expired') {
+    super(message);
+    this.name = 'AuthExpiredError';
+  }
+}
+
+/**
+ * Replace the entire finishing order for a season in ONE atomic transaction
+ * via the replace_finishing_order RPC (migration 047). The RPC does the
+ * DELETE + INSERT inside a single SECURITY DEFINER function body, so a failed
+ * INSERT (membership/group trigger rejection) rolls the DELETE back with it —
+ * the season can never be left wiped-with-nothing-inserted. Super-admin is
+ * enforced server-side by the function's am_i_super_admin() gate.
  *
  * Why full-replace instead of diff: the table is small (one Windex group =
  * ~10-20 finishers) and the admin UX is "edit the whole list, click save".
- * Doing a diff would add code without saving meaningful round-trips, and
- * makes ordering changes (which shift many rows' `place` values) noisier.
  *
- * Both operations are sequential and NOT transactional from the client side
- * — there's a brief window between DELETE and INSERT where the season has
- * no results. RLS makes this admin-only, and the sync trigger will null out
- * seasons.cup_champion_player_id transiently then re-set it on insert.
- * Acceptable for now; if it ever matters, lift to an Edge Function.
- *
- * Validation note: the membership-enforcement trigger fires per row on
- * INSERT for current-season entries. If any row fails (non-member), the
- * INSERT errors mid-batch leaving partial state. Surface the error so the
- * admin can fix and retry.
+ * Row shape sent to the RPC carries only { player_id, place, is_last_place };
+ * season_id/group_id are passed as params and applied server-side. An empty
+ * list clears the season atomically (delete-only). Throws AuthExpiredError on
+ * an expired-JWT rejection so the caller can offer re-auth.
  */
 export async function replaceFinishingOrder(
   seasonId: string,
   groupId: string,
   entries: FinishingOrderEntry[],
 ): Promise<void> {
-  // 1. Delete all existing rows for this season.
-  const delRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/championship_results?season_id=eq.${encodeURIComponent(seasonId)}`,
-    {
-      method: 'DELETE',
-      headers: restHeaders({ Prefer: 'return=minimal' }),
-    }
-  );
-  if (!delRes.ok) {
-    const body = await delRes.text().catch(() => '');
-    let parsed: { message?: string; details?: string } | null = null;
-    try { parsed = body ? JSON.parse(body) : null; } catch { /* keep raw */ }
-    const msg = parsed?.message ?? parsed?.details ?? body ?? `HTTP ${delRes.status}`;
-    throw new Error(`Failed to clear existing results: ${msg}`);
-  }
-
-  if (entries.length === 0) return;
-
-  // 2. Insert the new rows. PostgREST accepts an array body for bulk insert.
-  const payload = entries.map((e) => ({
-    season_id: seasonId,
-    group_id: groupId,
+  const rows = entries.map((e) => ({
     player_id: e.player_id,
     place: e.place,
     is_last_place: e.is_last_place,
   }));
-  const insRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/championship_results`,
-    {
-      method: 'POST',
-      headers: restHeaders({ Prefer: 'return=minimal' }),
-      body: JSON.stringify(payload),
-    }
-  );
-  if (!insRes.ok) {
-    const body = await insRes.text().catch(() => '');
-    let parsed: { message?: string; details?: string } | null = null;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/replace_finishing_order`, {
+    method: 'POST',
+    headers: restHeaders(),
+    body: JSON.stringify({ p_season_id: seasonId, p_group_id: groupId, p_rows: rows }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    let parsed: { message?: string; details?: string; code?: string } | null = null;
     try { parsed = body ? JSON.parse(body) : null; } catch { /* keep raw */ }
-    const msg = parsed?.message ?? parsed?.details ?? body ?? `HTTP ${insRes.status}`;
-    throw new Error(`Failed to insert results: ${msg}`);
+    // Expired JWT: PostgREST returns 401 with code PGRST301. Surface a typed
+    // error so the UI maps it to friendly copy + a recovery affordance rather
+    // than echoing the raw "JWT expired" string.
+    if (res.status === 401 || parsed?.code === 'PGRST301') {
+      throw new AuthExpiredError();
+    }
+    const msg = parsed?.message ?? parsed?.details ?? body ?? `HTTP ${res.status}`;
+    throw new Error(`Failed to save results: ${msg}`);
   }
 }
 

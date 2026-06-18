@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Season } from '../types';
 import { seasonLabel } from '../types';
 import {
+  AuthExpiredError,
   type ChampionshipResult,
   type FinishingOrderEntry,
   listChampionshipResults,
@@ -193,7 +194,19 @@ export function EditChampionshipResultsModal({
       await replaceFinishingOrder(season.id, season.group_id, entries);
       await onSaved();
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Failed to save');
+      // Expired session: keep the modal mounted and the entered rows in state
+      // (they are never cleared on error) and show friendly copy. There's no
+      // in-place re-auth today — the admin session is access-token-only with
+      // no refresh (see BACKLOG) — so the honest guidance is "sign in again,
+      // then re-enter". A true refresh / shared 401 interceptor is backlogged.
+      if (e instanceof AuthExpiredError) {
+        setSaveError(
+          'Your session expired. Sign in again, then return and re-enter your ' +
+          'results to save. (Staying signed in during long edits is a planned improvement.)'
+        );
+      } else {
+        setSaveError(e instanceof Error ? e.message : 'Failed to save');
+      }
       setBusy(false);
     }
   };
