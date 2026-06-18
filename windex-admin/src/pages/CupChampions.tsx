@@ -36,6 +36,69 @@ function formatRange(s: Season): string {
   return `${fmt(s.start_date)}–${fmt(s.end_date)}`;
 }
 
+/** 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 4 -> "4th", 11 -> "11th"... */
+function ordinal(n: number): string {
+  const v = n % 100;
+  const suffix = v >= 11 && v <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `${n}${suffix}`;
+}
+
+/**
+ * Collapse a sorted list of place numbers into a compact ordinal label,
+ * merging contiguous runs: [4,5,6,7,8] -> "4th–8th"; [3,5,6,7,8] -> "3rd, 5th–8th".
+ */
+function rangeLabel(nums: number[]): string {
+  if (nums.length === 0) return '';
+  const parts: string[] = [];
+  let start = nums[0];
+  let prev = nums[0];
+  for (let i = 1; i <= nums.length; i++) {
+    const n = nums[i];
+    if (n === prev + 1) { prev = n; continue; }
+    parts.push(start === prev ? ordinal(start) : `${ordinal(start)}–${ordinal(prev)}`);
+    start = n;
+    prev = n;
+  }
+  return parts.join(', ');
+}
+
+/**
+ * Per-season completeness derived from the finishing-order rows. Field size =
+ * the socks (last-place) finisher's place number — in standard competition
+ * ranking the last place value equals the number of competitors. Missing
+ * places are tie-aware: a recorded tie of k players at place p covers
+ * p..p+k-1, so the skipped numbers in that span are NOT counted as absent.
+ */
+type Completeness =
+  | { state: 'not-started' }
+  | { state: 'unknown' }
+  | { state: 'complete'; fieldSize: number }
+  | { state: 'incomplete'; rowCount: number; fieldSize: number; missing: number; absentLabel: string };
+
+function seasonCompleteness(rows: ChampionshipResult[]): Completeness {
+  if (rows.length === 0) return { state: 'not-started' };
+
+  const placed = rows.filter((r) => r.place !== null);
+  const socks = rows.find((r) => r.is_last_place);
+  const socksPlace = socks && socks.place !== null ? socks.place : null;
+  // No socks place recorded -> field size unknown (can't compute the gap yet).
+  if (socksPlace === null) return { state: 'unknown' };
+
+  // Tie-aware covered set: k players tied at place p occupy p..p+k-1.
+  const byPlace = new Map<number, number>();
+  for (const r of placed) byPlace.set(r.place as number, (byPlace.get(r.place as number) ?? 0) + 1);
+  const covered = new Set<number>();
+  for (const [p, k] of byPlace) for (let i = 0; i < k; i++) covered.add(p + i);
+
+  const absent: number[] = [];
+  for (let p = 1; p <= socksPlace; p++) if (!covered.has(p)) absent.push(p);
+
+  const rowCount = placed.length;
+  const missing = socksPlace - rowCount;
+  if (missing <= 0 && absent.length === 0) return { state: 'complete', fieldSize: socksPlace };
+  return { state: 'incomplete', rowCount, fieldSize: socksPlace, missing, absentLabel: rangeLabel(absent) };
+}
+
 export function CupChampions() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
@@ -70,6 +133,23 @@ export function CupChampions() {
     () => seasons.filter((s) => seasonStatus(s, today) !== 'future' || s.id === comingSeasonId),
     [seasons, today, comingSeasonId],
   );
+
+  // Completeness per visible season + the aggregate research-debt summary.
+  const completenessBySeason = useMemo(() => {
+    const m = new Map<string, Completeness>();
+    for (const s of visibleSeasons) m.set(s.id, seasonCompleteness(resultsBySeason.get(s.id) ?? []));
+    return m;
+  }, [visibleSeasons, resultsBySeason]);
+  const researchSummary = useMemo(() => {
+    let toResearch = 0;
+    let incompleteSeasons = 0;
+    let unknownSeasons = 0;
+    for (const c of completenessBySeason.values()) {
+      if (c.state === 'incomplete') { toResearch += c.missing; incompleteSeasons += 1; }
+      else if (c.state === 'unknown') unknownSeasons += 1;
+    }
+    return { toResearch, incompleteSeasons, unknownSeasons };
+  }, [completenessBySeason]);
 
   // Initial load: gate, groups, default group selection.
   useEffect(() => {
@@ -203,12 +283,32 @@ export function CupChampions() {
         ) : visibleSeasons.length === 0 ? (
           <EmptyState message={`No seasons for ${selectedGroup.name} yet.`} />
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+          <>
+            {(researchSummary.toResearch > 0 || researchSummary.unknownSeasons > 0) && (
+              <div style={summaryBarStyle}>
+                {researchSummary.toResearch > 0 && (
+                  <strong>
+                    {researchSummary.toResearch} finisher{researchSummary.toResearch === 1 ? '' : 's'} still to
+                    research across {researchSummary.incompleteSeasons} season
+                    {researchSummary.incompleteSeasons === 1 ? '' : 's'}
+                  </strong>
+                )}
+                {researchSummary.toResearch > 0 && researchSummary.unknownSeasons > 0 && ' · '}
+                {researchSummary.unknownSeasons > 0 && (
+                  <span>
+                    {researchSummary.unknownSeasons} season{researchSummary.unknownSeasons === 1 ? '' : 's'} need
+                    {researchSummary.unknownSeasons === 1 ? 's' : ''} a last-place recorded
+                  </span>
+                )}
+              </div>
+            )}
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #ddd', textAlign: 'left' }}>
                 <th style={th}>Season</th>
                 <th style={th}>Status</th>
                 <th style={th}>Finishing Order</th>
+                <th style={th}>Completeness</th>
                 <th style={th}></th>
               </tr>
             </thead>
@@ -246,6 +346,9 @@ export function CupChampions() {
                         <span style={{ fontStyle: 'italic', color: '#999' }}>No results recorded yet</span>
                       )}
                     </td>
+                    <td style={td}>
+                      <CompletenessCell c={completenessBySeason.get(s.id) ?? { state: 'not-started' }} />
+                    </td>
                     <td style={{ ...td, textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button
                         className="btn btn-secondary"
@@ -266,7 +369,8 @@ export function CupChampions() {
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </>
         )}
       </div>
 
@@ -381,6 +485,36 @@ function FinishingOrderList({
 }
 
 /**
+ * Per-season completeness indicator. Three research-relevant states (complete /
+ * incomplete-known-field / field-unknown) plus a neutral "not started" for
+ * seasons with no results yet (current/coming — future work, not research debt).
+ */
+function CompletenessCell({ c }: { c: Completeness }) {
+  const pill: React.CSSProperties = {
+    display: 'inline-block', padding: '2px 8px', borderRadius: 10,
+    fontSize: 12, fontWeight: 600,
+  };
+  switch (c.state) {
+    case 'not-started':
+      return <span style={{ color: '#bbb' }}>—</span>;
+    case 'unknown':
+      return (
+        <span style={{ fontSize: 12, color: '#777' }} title="Record the last-place (socks) finisher to establish the field size">
+          Field size unknown · record last place first
+        </span>
+      );
+    case 'complete':
+      return <span style={{ ...pill, background: '#e6f4ea', color: '#1e7e34' }}>✓ Complete · field of {c.fieldSize}</span>;
+    case 'incomplete':
+      return (
+        <span style={{ ...pill, background: '#fff3cd', color: '#856404', whiteSpace: 'normal' }}>
+          {c.rowCount} of {c.fieldSize} recorded{c.absentLabel ? ` · research ${c.absentLabel}` : ''}
+        </span>
+      );
+  }
+}
+
+/**
  * Notes-only editor. Per the locked spec, seasons.cup_champion_notes stays
  * editable directly on the season row, orthogonal to championship_results.
  * The original SetChampionModal's player picker was removed because
@@ -491,6 +625,16 @@ function EditNotesModal({
 
 const th: React.CSSProperties = { padding: '8px 10px' };
 const td: React.CSSProperties = { padding: '10px 10px', verticalAlign: 'top' };
+
+const summaryBarStyle: React.CSSProperties = {
+  marginBottom: 12,
+  padding: '8px 12px',
+  background: '#f8f9fa',
+  border: '1px solid #e0e0e0',
+  borderRadius: 4,
+  fontSize: 13,
+  color: '#444',
+};
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
