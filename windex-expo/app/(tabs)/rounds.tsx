@@ -182,7 +182,7 @@ export default function RoundsScreen() {
       <View style={styles.seasonActions}>
         {canAddRound && (
           <Pressable style={[styles.addRoundBtn, { backgroundColor: colors.tint }]} onPress={() => setShowAddRound(true)}>
-            <Text style={styles.addRoundText}>+ Add Round</Text>
+            <Text style={styles.addRoundText}>+ Add Match</Text>
           </Pressable>
         )}
       </View>
@@ -191,7 +191,7 @@ export default function RoundsScreen() {
 
   return (
     <ThemedView style={styles.screen}>
-      <Header title={<GroupPicker tabName="Rounds" />} onMenuPress={openDrawer} />
+      <Header title={<GroupPicker tabName="Matches" />} onMenuPress={openDrawer} />
 
       <GroupBanner
         imageUrl={selectedGroup?.logo_url ?? null}
@@ -215,7 +215,7 @@ export default function RoundsScreen() {
         ListEmptyComponent={
           !loadingEvents && selectedGroup && !error ? (
             <ThemedText style={[styles.empty, { color: muted }]}>
-              No rounds found.
+              No matches found.
             </ThemedText>
           ) : null
         }

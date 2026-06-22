@@ -158,7 +158,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
     if (!isValid || !selectedGroup || !selectedSeason) return;
     // Backstop: never submit a future-dated round, even if state slipped past the inline guard.
     if (dateText > toISODate(new Date())) {
-      setError('Round date cannot be in the future');
+      setError('Match date cannot be in the future');
       return;
     }
     setSubmitting(true);
@@ -188,7 +188,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
         onClose();
       }, 800);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to submit round');
+      setError(e instanceof Error ? e.message : 'Failed to submit match');
     } finally {
       setSubmitting(false);
     }
@@ -207,7 +207,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
             {/* Header */}
             <View style={styles.header}>
-              <Text style={styles.title}>Add Round</Text>
+              <Text style={styles.title}>Add Match</Text>
               <Pressable onPress={onClose} hitSlop={8}>
                 <Text style={styles.closeBtn}>{'\u2715'}</Text>
               </Pressable>
@@ -229,7 +229,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
               />
               <Text style={styles.datePreview}>{formatDateDisplay(date)}</Text>
               {isFutureDate && (
-                <Text style={styles.dateError}>Round date cannot be in the future</Text>
+                <Text style={styles.dateError}>Match date cannot be in the future</Text>
               )}
 
               {/* Season (read-only) */}
@@ -241,7 +241,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
 
               {/* Tournament toggle */}
               <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Tournament Round</Text>
+                <Text style={styles.toggleLabel}>Tournament Match</Text>
                 <Switch
                   value={tournament}
                   onValueChange={setTournament}
@@ -346,7 +346,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
 
               {/* Error / Success */}
               {error && <Text style={styles.errorText}>{error}</Text>}
-              {success && <Text style={styles.successText}>Round added!</Text>}
+              {success && <Text style={styles.successText}>Match added!</Text>}
             </ScrollView>
 
             {/* Footer */}
@@ -360,7 +360,7 @@ export function AddRoundModal({ visible, onClose, onSuccess }: Props) {
                 disabled={!isValid || submitting}
               >
                 <Text style={styles.submitBtnText}>
-                  {submitting ? 'Submitting...' : tournament ? 'Submit Tournament' : 'Submit Round'}
+                  {submitting ? 'Submitting...' : tournament ? 'Submit Tournament' : 'Submit Match'}
                 </Text>
               </Pressable>
             </View>

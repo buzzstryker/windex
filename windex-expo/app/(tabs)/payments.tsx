@@ -205,7 +205,7 @@ export default function PaymentsScreen() {
         Payments
       </ThemedText>
       <ThemedText style={[styles.sub, { color: muted }]}>
-        Compute money deltas and generate payment requests for a round.
+        Compute money deltas and generate payment requests for a match.
       </ThemedText>
 
       <ScrollView
@@ -243,14 +243,14 @@ export default function PaymentsScreen() {
             style={[styles.selectBtn, { borderColor: border }]}
             onPress={() => seasonId && setPicker('round')}
             disabled={!seasonId || loadingEvents}>
-            <ThemedText type="defaultSemiBold">Round</ThemedText>
+            <ThemedText type="defaultSemiBold">Match</ThemedText>
             <ThemedText style={{ color: muted }} numberOfLines={1}>
               {selectedRound
                 ? selectedRound.round_date
                 : seasonId
                   ? loadingEvents
                     ? 'Loading...'
-                    : 'Choose round'
+                    : 'Choose match'
                   : 'Select season first'}
             </ThemedText>
           </Pressable>
@@ -329,7 +329,7 @@ export default function PaymentsScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setPicker(null)} />
           <ThemedView style={[styles.modalSheet, { paddingBottom: insets.bottom + 16 }]}>
             <ThemedText type="subtitle" style={styles.modalTitle}>
-              {picker === 'group' ? 'Group' : picker === 'season' ? 'Season' : 'Round'}
+              {picker === 'group' ? 'Group' : picker === 'season' ? 'Season' : 'Match'}
             </ThemedText>
             <FlatList
               data={

@@ -186,7 +186,7 @@ export default function HistoryScreen() {
         History
       </ThemedText>
       <ThemedText style={[styles.sub, { color: muted }]}>
-        Select a group, season, then tap a player to see round-by-round history.
+        Select a group, season, then tap a player to see match-by-match history.
       </ThemedText>
 
       <View style={styles.selectors}>
@@ -283,7 +283,7 @@ export default function HistoryScreen() {
                   Total points: {history.total_points}
                 </ThemedText>
                 <ThemedText style={{ color: muted }}>
-                  Rounds played: {history.rounds_played}
+                  Matches played: {history.rounds_played}
                 </ThemedText>
               </ThemedView>
 

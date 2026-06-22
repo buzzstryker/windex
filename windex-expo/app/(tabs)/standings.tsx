@@ -151,7 +151,7 @@ export default function StandingsScreen() {
   // season label instead of ": 0 Rounds". Singular vs plural on N === 1.
   const seasonPillLabel =
     seasonRoundCount && seasonRoundCount > 0
-      ? `${currentDisplayLabel}: ${seasonRoundCount} ${seasonRoundCount === 1 ? 'Round' : 'Rounds'}`
+      ? `${currentDisplayLabel}: ${seasonRoundCount} ${seasonRoundCount === 1 ? 'Match' : 'Matches'}`
       : currentDisplayLabel;
 
   // Fetch standings — single season or all-time aggregate

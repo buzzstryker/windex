@@ -287,7 +287,7 @@ export default function GroupDetailScreen() {
             </View>
             <View style={styles.statCard}>
               <Text style={styles.statValue}>{totalRounds}</Text>
-              <Text style={styles.statLabel}>Rounds Played</Text>
+              <Text style={styles.statLabel}>Matches Played</Text>
             </View>
           </View>
 
@@ -323,7 +323,7 @@ export default function GroupDetailScreen() {
                   {formatDateRange(currentSeason.season)}
                 </Text>
                 <Text style={styles.seasonRounds}>
-                  {currentSeason.eventCount} round{currentSeason.eventCount !== 1 ? 's' : ''} played
+                  {currentSeason.eventCount} match{currentSeason.eventCount !== 1 ? 'es' : ''} played
                 </Text>
               </View>
             ) : null}

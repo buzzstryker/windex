@@ -232,7 +232,7 @@ export default function RoundDetailScreen() {
       if (!roundRes.ok) {
         const text = await roundRes.text();
         console.error('Delete round failed:', roundRes.status, text);
-        throw new Error(`Failed to delete round: ${roundRes.status}`);
+        throw new Error(`Failed to delete match: ${roundRes.status}`);
       }
 
       invalidateData();
@@ -241,7 +241,7 @@ export default function RoundDetailScreen() {
       console.error('Delete error:', e);
       const msg = e instanceof Error ? e.message : 'Delete failed';
       setActionMsg(msg.includes('permission') || msg.includes('policy') || msg.includes('403')
-        ? "You don't have permission to delete this round"
+        ? "You don't have permission to delete this match"
         : msg);
     }
   };
@@ -395,7 +395,7 @@ export default function RoundDetailScreen() {
           <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'\u2039'}</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>Round Details</Text>
+          <Text style={styles.headerTitle}>Match Details</Text>
           <View style={styles.backButton} />
         </View>
       </View>
@@ -434,7 +434,7 @@ export default function RoundDetailScreen() {
           {event.is_tournament === 1 && (
             <View style={styles.tournamentBanner}>
               <Text style={styles.tournamentBannerText}>
-                {'\uD83C\uDFC6'} Tournament Round — {event.tournament_buyin ?? 0} pt buy-in
+                {'\uD83C\uDFC6'} Tournament Match — {event.tournament_buyin ?? 0} pt buy-in
               </Text>
             </View>
           )}
@@ -584,8 +584,8 @@ export default function RoundDetailScreen() {
       <Modal visible={deleteConfirmVisible} animationType="fade" transparent>
         <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
-            <Text style={styles.confirmTitle}>Delete Round?</Text>
-            <Text style={styles.confirmMsg}>This will permanently delete this round and all its scores. This cannot be undone.</Text>
+            <Text style={styles.confirmTitle}>Delete Match?</Text>
+            <Text style={styles.confirmMsg}>This will permanently delete this match and all its scores. This cannot be undone.</Text>
             <View style={styles.confirmButtons}>
               <Pressable style={styles.confirmCancelBtn} onPress={cancelDelete}>
                 <Text style={styles.confirmCancelText}>Cancel</Text>

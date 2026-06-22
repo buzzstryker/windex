@@ -96,7 +96,7 @@ function TabLayoutInner() {
       <Tabs.Screen
         name="rounds"
         options={{
-          title: 'Rounds',
+          title: 'Matches',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="paperplane.fill" color={color} />,
           tabBarBadge: hasUnreadRounds ? '' : undefined,
           tabBarBadgeStyle: BADGE_DOT_STYLE,

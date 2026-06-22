@@ -24,7 +24,7 @@ export default function AboutScreen() {
         </ThemedText>
         <ThemedText style={[styles.p, { color: muted }]}>
           <ThemedText type="defaultSemiBold">Windex</ThemedText> aggregates points and
-          standings from submitted rounds. This iPad app talks to the same backend as your admin
+          standings from submitted matches. This iPad app talks to the same backend as your admin
           workflow.
         </ThemedText>
         <ThemedText style={[styles.p, { color: muted }]}>

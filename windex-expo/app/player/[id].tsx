@@ -227,7 +227,7 @@ export default function PlayerRoundsScreen() {
           {summaryStrip}
           {championshipsCard}
           <ThemedText style={[styles.empty, { color: muted }]}>
-            No rounds found for this player in this season.
+            No matches found for this player in this season.
           </ThemedText>
         </>
       ) : (

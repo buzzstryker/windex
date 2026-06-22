@@ -78,6 +78,8 @@
 
 - **Future access-control review:** Evaluate whether round-level actions should authorize by `league_rounds.user_id` or by group-based permissions derived from membership/role in the associated group.
 
+- **DB rename rounds → matches (deferred):** UI strings renamed to 'Matches' (session 2026-06-22); underlying DB objects (league_rounds, rounds_reads, league_round_id, round_date), providers (RoundsUnreadProvider), and route names still use rounds. Structural rename deferred — would require migration (table/column/FK renames), RLS rewrites, edge-function refs, and provider renames. Label/identifier drift is intentional and accepted until then.
+
 - **Scorekeeper integration:** When Scorekeeper is ready, wire up `POST /ingest-event-results` as the submission target after a round is scored. Requirements:
   - Player ID mapping between Scorekeeper and Windex (use `player_mappings` table with `source_app = "scorekeeper"`)
   - Use `source_app = "scorekeeper"` and `external_event_id` for idempotency (prevents duplicate rounds)

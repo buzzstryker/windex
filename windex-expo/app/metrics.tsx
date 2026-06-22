@@ -263,7 +263,7 @@ export default function MetricsScreen() {
                 </View>
               </ScrollView>
               <View style={styles.footnoteRow}>
-                <Text style={styles.footnote}>* 2023+ seasons. Parentheses = shared rounds.</Text>
+                <Text style={styles.footnote}>* 2023+ seasons. Parentheses = shared matches.</Text>
                 <Text style={[styles.sigBadge, { color: excludeSig ? '#C62828' : '#2E7D32' }]}>
                   Tournaments: {excludeSig ? 'excluded' : 'included'}
                 </Text>
@@ -287,7 +287,7 @@ export default function MetricsScreen() {
                 Tournaments: {excludeSig ? 'excluded' : 'included'}
               </Text>
               {matchups.length === 0 ? (
-                <Text style={styles.cardSubtitle}>No matchups with enough rounds.</Text>
+                <Text style={styles.cardSubtitle}>No matchups with enough matches.</Text>
               ) : (
                 <View>
                   <View style={styles.matchupRow}>
@@ -342,11 +342,11 @@ export default function MetricsScreen() {
                   <Text style={{ fontWeight: '700' }}>{detail.player_b.display_name}</Text>
                   {' across '}
                   <Text style={{ fontWeight: '700' }}>{detail.lifetime.rounds_together}</Text>
-                  {' rounds, avg '}
+                  {' matches, avg '}
                   <Text style={{ fontWeight: '700' }}>
                     {(detail.lifetime.net_points / detail.lifetime.rounds_together).toFixed(1)}
                   </Text>
-                  {' per round.'}
+                  {' per match.'}
                 </Text>
                 <View style={styles.wltRow}>
                   <View style={styles.wltItem}>
