@@ -71,6 +71,8 @@ function RootNavigator() {
       await signOut();
     } else if (route === 'groups') {
       router.push('/groups');
+    } else if (route === 'activity') {
+      router.push('/activity');
     }
   };
 
@@ -86,6 +88,8 @@ function RootNavigator() {
         <Stack.Screen name="group-members" options={{ headerShown: false }} />
         <Stack.Screen name="broadcast-notes" options={{ headerShown: false }} />
         <Stack.Screen name="metrics" options={{ headerShown: false }} />
+        <Stack.Screen name="activity/index" options={{ headerShown: false }} />
+        <Stack.Screen name="activity/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <Drawer

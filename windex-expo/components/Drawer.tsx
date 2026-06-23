@@ -56,7 +56,7 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
-  const { groups, myGroups, selectedGroup, selectGroup } = useGroup();
+  const { groups, myGroups, selectedGroup, selectGroup, isSuperAdmin } = useGroup();
 
   const sheetBg = colorScheme === 'dark' ? colors.card : '#FFFFFF';
   const textColor = colors.text;
@@ -165,6 +165,12 @@ export function Drawer({ visible, onClose, onNavigate, userName, userEmail }: Dr
               <MaterialIcons name="group" size={22} color={mutedColor} style={styles.menuIcon} />
               <Text style={[styles.menuLabel, { color: textColor }]}>Group Details</Text>
             </TouchableOpacity>
+            {isSuperAdmin && (
+              <TouchableOpacity style={styles.menuItem} onPress={() => onNavigate('activity')} activeOpacity={0.6}>
+                <MaterialIcons name="query-stats" size={22} color={mutedColor} style={styles.menuIcon} />
+                <Text style={[styles.menuLabel, { color: textColor }]}>App Activity</Text>
+              </TouchableOpacity>
+            )}
             {badgeItemVisible && (
               <TouchableOpacity style={styles.menuItem} onPress={handleEnableBadges} activeOpacity={0.6}>
                 <MaterialIcons name="notifications" size={22} color={mutedColor} style={styles.menuIcon} />
