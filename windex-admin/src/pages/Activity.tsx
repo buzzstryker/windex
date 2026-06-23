@@ -9,7 +9,6 @@ import {
   eventTypeLabel,
   formatTimestamp,
   getPlayersWithLastActivity,
-  relativeTime,
   type PlayerWithLastActivity,
 } from '../api/activity';
 
@@ -79,7 +78,6 @@ export function Activity() {
             <tbody>
               {rows.map((r) => {
                 const hasActivity = r.last_event_at !== null;
-                const rel = relativeTime(r.last_event_at);
                 return (
                   <tr key={r.player_id} style={{ borderBottom: '1px solid #eee' }}>
                     <td style={td}>
@@ -89,14 +87,7 @@ export function Activity() {
                     </td>
                     <td style={{ ...td, color: '#666' }}>{r.email ?? '—'}</td>
                     <td style={{ ...td, color: hasActivity ? '#1a1a1a' : '#999' }}>
-                      {hasActivity ? (
-                        <>
-                          <div>{formatTimestamp(r.last_event_at)}</div>
-                          {rel && <div style={{ fontSize: 12, color: '#999' }}>{rel}</div>}
-                        </>
-                      ) : (
-                        'NA'
-                      )}
+                      {hasActivity ? formatTimestamp(r.last_event_at) : 'NA'}
                     </td>
                     <td style={{ ...td, color: hasActivity ? '#1a1a1a' : '#999' }}>
                       {hasActivity ? eventTypeLabel(r.last_event_type) : 'NA'}

@@ -26,7 +26,7 @@ export function Layout() {
     { path: '/groups', label: 'Groups' },
     { path: '/cup-champions', label: 'Cup Champions' },
     { path: '/players', label: 'Players' },
-    { path: '/activity', label: 'App Activity' },
+    ...(isSuperAdmin ? [{ path: '/activity', label: 'App Activity' }] : []),
     { path: '/analytics/points', label: 'Points Analysis' },
     { path: '/review/attribution', label: 'Attribution review' },
     { path: '/review/player-mapping', label: 'Player Mapping' },
