@@ -35,6 +35,7 @@ type PaymentRow = {
 };
 
 import { useGroup } from '@/contexts/GroupContext';
+import { useSafeBack } from '@/lib/useSafeBack';
 
 export default function RoundDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -43,6 +44,7 @@ export default function RoundDetailScreen() {
   const { isSuperAdmin, isGroupAdmin, invalidateData } = useGroup();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const goBack = useSafeBack();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -236,7 +238,7 @@ export default function RoundDetailScreen() {
       }
 
       invalidateData();
-      router.back();
+      goBack();
     } catch (e) {
       console.error('Delete error:', e);
       const msg = e instanceof Error ? e.message : 'Delete failed';
@@ -392,7 +394,7 @@ export default function RoundDetailScreen() {
       {/* Olive green header */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+          <Pressable onPress={goBack} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'\u2039'}</Text>
           </Pressable>
           <Text style={styles.headerTitle}>Match Details</Text>

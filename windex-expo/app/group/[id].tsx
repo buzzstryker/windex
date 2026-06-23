@@ -32,6 +32,7 @@ import {
   type Season,
   type StandingRow,
 } from '@/lib/api';
+import { useSafeBack } from '@/lib/useSafeBack';
 
 type GroupDetail = Group & {
   logo_url?: string | null;
@@ -52,6 +53,7 @@ export default function GroupDetailScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const goBack = useSafeBack();
 
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [sectionName, setSectionName] = useState<string | null>(null);
@@ -213,7 +215,7 @@ export default function GroupDetailScreen() {
       {/* Olive green header */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+          <Pressable onPress={goBack} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'\u2039'}</Text>
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>

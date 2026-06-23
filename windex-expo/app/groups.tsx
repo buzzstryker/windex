@@ -20,6 +20,7 @@ import {
   type Group,
   type Section,
 } from '@/lib/api';
+import { useSafeBack } from '@/lib/useSafeBack';
 
 type GroupExt = Group & {
   logo_url?: string | null;
@@ -30,6 +31,7 @@ export default function GroupsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const goBack = useSafeBack();
 
   const [groups, setGroups] = useState<GroupExt[]>([]);
   const [sectionNames, setSectionNames] = useState<Record<string, string>>({});
@@ -83,7 +85,7 @@ export default function GroupsScreen() {
       {/* Olive green header */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+          <Pressable onPress={goBack} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'\u2039'}</Text>
           </Pressable>
           <Text style={styles.headerTitle}>Groups</Text>

@@ -19,6 +19,7 @@ import {
   type BroadcastNotesResponse,
   type MemberWithPlayer,
 } from '@/lib/api';
+import { useSafeBack } from '@/lib/useSafeBack';
 
 const OLIVE = '#4B5E2A';
 
@@ -26,6 +27,7 @@ export default function BroadcastNotesScreen() {
   const { group_id, group_name } = useLocalSearchParams<{ group_id: string; group_name?: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const goBack = useSafeBack();
 
   const [members, setMembers] = useState<MemberWithPlayer[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(true);
@@ -121,7 +123,7 @@ export default function BroadcastNotesScreen() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+          <Pressable onPress={goBack} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'‹'}</Text>
           </Pressable>
           <View style={styles.headerTitleWrap}>

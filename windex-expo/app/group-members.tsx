@@ -18,6 +18,7 @@ import {
   updateMembershipRest,
   type MemberWithPlayer,
 } from '@/lib/api';
+import { useSafeBack } from '@/lib/useSafeBack';
 
 const OLIVE = '#4B5E2A';
 
@@ -25,6 +26,7 @@ export default function GroupMembersScreen() {
   const { group_id, group_name } = useLocalSearchParams<{ group_id: string; group_name?: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const goBack = useSafeBack();
 
   const [members, setMembers] = useState<MemberWithPlayer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,7 +145,7 @@ export default function GroupMembersScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+          <Pressable onPress={goBack} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'\u2039'}</Text>
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>

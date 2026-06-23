@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { useGroup } from '@/contexts/GroupContext';
+import { useSafeBack } from '@/lib/useSafeBack';
 import {
   eventTypeLabel,
   formatTimestamp,
@@ -38,6 +39,7 @@ const PAGE_LIMIT = 100;
 export default function ActivityDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const goBack = useSafeBack();
   const { isSuperAdmin } = useGroup();
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = rawId ?? '';
@@ -93,7 +95,7 @@ export default function ActivityDetailScreen() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
-          <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backButton}>
+          <Pressable onPress={goBack} hitSlop={8} style={styles.backButton}>
             <Text style={styles.backArrow}>{'‹'}</Text>
           </Pressable>
           <View style={styles.headerTitleWrap}>
