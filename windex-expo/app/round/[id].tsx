@@ -287,7 +287,7 @@ export default function RoundDetailScreen() {
   const openVenmo = (toPlayerId: string, amount: number) => {
     const handle = venmoHandles[toPlayerId];
     if (!handle) return;
-    const note = `${groupName || 'Windex'} Golf - ${event ? formatRoundDateShort(event.round_date) : ''}`;
+    const note = 'Windex';
     const url = `https://venmo.com/${encodeURIComponent(handle)}?txn=pay&amount=${amount.toFixed(2)}&note=${encodeURIComponent(note)}`;
     Linking.openURL(url).catch(() => {});
   };
