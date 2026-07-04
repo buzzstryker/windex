@@ -19,6 +19,8 @@ import {
   type MemberWithPlayer,
 } from '@/lib/api';
 import { useSafeBack } from '@/lib/useSafeBack';
+import { useGroup } from '@/contexts/GroupContext';
+import { AddInvitePlayerSheet } from '@/components/AddInvitePlayerSheet';
 
 const OLIVE = '#4B5E2A';
 
@@ -35,10 +37,12 @@ export default function GroupMembersScreen() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  // Check if current user is admin of this group
-  const isAdmin = members.some((m) => m.role === 'admin');
-  // For now, treat all users as admin for editing (the dev user owns everything)
-  const canEdit = true;
+  // Edit affordances are gated to super-admins and this group's admins (RLS
+  // backstops the writes server-side; this hides the UI from everyone else).
+  // Add / Invite is super-admin only.
+  const { isSuperAdmin, isGroupAdmin } = useGroup();
+  const canEdit = isSuperAdmin || (group_id ? isGroupAdmin(group_id) : false);
+  const [addOpen, setAddOpen] = useState(false);
 
   // Edit form state
   const [editDisplayName, setEditDisplayName] = useState('');
@@ -151,7 +155,13 @@ export default function GroupMembersScreen() {
           <Text style={styles.headerTitle} numberOfLines={1}>
             {group_name ? decodeURIComponent(group_name) : 'Members'}
           </Text>
-          <View style={styles.backButton} />
+          {isSuperAdmin ? (
+            <Pressable onPress={() => setAddOpen(true)} hitSlop={8} style={styles.backButton} accessibilityLabel="Add or invite player">
+              <Text style={styles.addBtn}>{'＋'}</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.backButton} />
+          )}
         </View>
       </View>
 
@@ -227,6 +237,14 @@ export default function GroupMembersScreen() {
           </View>
         </View>
       </Modal>
+
+      <AddInvitePlayerSheet
+        visible={addOpen}
+        groupId={group_id}
+        groupName={group_name}
+        onClose={() => setAddOpen(false)}
+        onChanged={load}
+      />
     </View>
   );
 }
@@ -237,6 +255,7 @@ const styles = StyleSheet.create({
   headerRow: { height: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 },
   backButton: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
   backArrow: { fontSize: 32, color: '#FFF', fontWeight: '300', lineHeight: 36 },
+  addBtn: { fontSize: 28, color: '#FFF', fontWeight: '400', lineHeight: 32 },
   headerTitle: { fontSize: 17, fontWeight: '600', color: '#FFF', textAlign: 'center', flex: 1 },
   spinner: { marginVertical: 40 },
   errorCard: { backgroundColor: '#FFEBEE', borderRadius: 10, padding: 14, margin: 16 },
