@@ -1,4 +1,4 @@
-import { apiFetch, ApiError, getAuthToken } from './client';
+import { apiFetch, ApiError, getAuthToken, writeHeaders } from './client';
 
 const SUPABASE_URL = (
   typeof import.meta.env !== 'undefined' && import.meta.env.VITE_LATE_ADD_API_URL
@@ -130,13 +130,21 @@ export async function updatePlayer(
     `${SUPABASE_URL}/rest/v1/players?id=eq.${encodeURIComponent(playerId)}`,
     {
       method: 'PATCH',
-      headers: headers({ Prefer: 'return=minimal' }),
+      // return=representation (not minimal) so we can detect a 0-row update.
+      // writeHeaders requires a live session — no silent anon fallback.
+      headers: writeHeaders({ Prefer: 'return=representation' }),
       body: JSON.stringify({ ...updates, updated_at: new Date().toISOString() }),
     }
   );
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Failed to update player: ${res.status} ${text}`);
+  }
+  // A PATCH that matches 0 rows (RLS-filtered or id not found) returns 200 with
+  // an empty array. Surface it instead of reporting a false "Saved".
+  const rows = await res.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Nothing was saved — the player was not found or you do not have permission to edit it.');
   }
 }
 
@@ -148,13 +156,17 @@ export async function updateMembership(
     `${SUPABASE_URL}/rest/v1/group_members?id=eq.${encodeURIComponent(membershipId)}`,
     {
       method: 'PATCH',
-      headers: headers({ Prefer: 'return=minimal' }),
+      headers: writeHeaders({ Prefer: 'return=representation' }),
       body: JSON.stringify(updates),
     }
   );
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Failed to update membership: ${res.status} ${text}`);
+  }
+  const rows = await res.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Nothing was saved — the membership was not found or you do not have permission to edit it.');
   }
 }
 

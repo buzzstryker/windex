@@ -1,4 +1,4 @@
-import { getAuthToken } from './client';
+import { getAuthToken, writeHeaders } from './client';
 
 const SUPABASE_URL = (
   typeof import.meta.env !== 'undefined' && import.meta.env.VITE_LATE_ADD_API_URL
@@ -140,7 +140,9 @@ export async function setSeasonChampion(
     `${SUPABASE_URL}/rest/v1/seasons?id=eq.${encodeURIComponent(seasonId)}`,
     {
       method: 'PATCH',
-      headers: restHeaders({ Prefer: 'return=minimal' }),
+      // return=representation + live-session write headers: detect a 0-row
+      // update (RLS-filtered / season not found) instead of a false success.
+      headers: writeHeaders({ Prefer: 'return=representation' }),
       body: JSON.stringify(body),
     }
   );
@@ -150,5 +152,9 @@ export async function setSeasonChampion(
     try { parsed = text ? JSON.parse(text) : null; } catch { /* keep raw */ }
     const msg = parsed?.message ?? parsed?.details ?? text ?? `HTTP ${res.status}`;
     throw new Error(msg);
+  }
+  const rows = await res.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Nothing was saved — the season was not found or you do not have permission to edit it.');
   }
 }

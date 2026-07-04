@@ -1,4 +1,4 @@
-import { apiFetch, ApiError, getAuthToken } from './client';
+import { apiFetch, ApiError, getAuthToken, writeHeaders } from './client';
 import type { Group, Season } from '../types';
 
 const SUPABASE_URL = (
@@ -299,7 +299,10 @@ export async function deleteGroup(groupId: string): Promise<void> {
     `${SUPABASE_URL}/rest/v1/groups?id=eq.${encodeURIComponent(groupId)}`,
     {
       method: 'DELETE',
-      headers: restHeaders({ Prefer: 'return=minimal' }),
+      // return=representation + live-session write headers: a DELETE that
+      // matches 0 rows (RLS-filtered / already gone) otherwise returns 204 and
+      // looks like success. Surface it instead.
+      headers: writeHeaders({ Prefer: 'return=representation' }),
     }
   );
   if (!res.ok) {
@@ -308,5 +311,9 @@ export async function deleteGroup(groupId: string): Promise<void> {
     try { parsed = body ? JSON.parse(body) : null; } catch { /* keep raw */ }
     const msg = parsed?.message ?? parsed?.details ?? body ?? `HTTP ${res.status}`;
     throw new Error(msg);
+  }
+  const rows = await res.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Nothing was deleted — the group was not found or you do not have permission to delete it.');
   }
 }

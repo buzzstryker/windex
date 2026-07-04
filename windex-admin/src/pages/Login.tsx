@@ -25,6 +25,7 @@ export function Login() {
   const [mode, setMode] = useState<'email' | 'jwt'>('email');
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/dashboard';
+  const sessionExpired = new URLSearchParams(location.search).get('reason') === 'session-expired';
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +79,12 @@ export function Login() {
   return (
     <>
       <PageHeader title="Sign in" subtitle="Sign in with email/password or paste a JWT." />
+
+      {sessionExpired && (
+        <p role="alert" style={{ color: '#c62828', marginBottom: 12 }}>
+          Your session expired. Please sign in again.
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <button
