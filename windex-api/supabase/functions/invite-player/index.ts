@@ -31,7 +31,8 @@
 //
 // Request body:
 //   {
-//     "display_name": "Jane Doe",
+//     "full_name": "Jane Doe",       // optional; required when display_name omitted
+//     "display_name": "JDoe",        // optional; auto-generated from full_name if blank
 //     "email": "jane@example.com",
 //     "send_invite": true,
 //     "group_assignments": [
@@ -39,6 +40,9 @@
 //       { "group_id": "def456", "role": "admin" }
 //     ]
 //   }
+// At least one of full_name / display_name is required. When display_name is
+// blank it is generated server-side via the canonical ladder (see
+// generateDisplayName) — the single source of truth for auto-nicknames.
 //
 // Responses:
 //   200 { player, groups_assigned, invite_sent, already_had_auth, warning? }
@@ -88,24 +92,82 @@ type GroupAssignment = { group_id: string; role: "admin" | "member" };
 
 type InvitePlayerRequest = {
   display_name?: unknown;
+  full_name?: unknown;
   email?: unknown;
   send_invite?: unknown;
   group_assignments?: unknown;
 };
 
+// ── Canonical display_name ladder ─────────────────────────────────────────
+// Single source of truth for auto-generated nicknames (the original lived only
+// in the deleted Glide import script). Given a full name:
+//   base = first-initial + first 4 chars of the LAST-word surname
+//          (Scott Prince -> SPrin). Middle names/initials ignored. Non-alpha
+//          (periods, apostrophes, hyphens) stripped before slicing.
+//   collision -> extend the surname one char at a time (SPrinc, SPrince, ...)
+//                until unique or the surname is exhausted;
+//   still colliding -> append 2, 3, ... to the full-surname form (SPrince2).
+//   single-word name (no surname) -> the first name as-is, number ladder on it.
+// Interior caps preserved (McDonald -> McDo). Dedupe is case-insensitive vs the
+// supplied `taken` set (all existing players.display_name, lowercased).
+function cleanAlpha(s: string): string {
+  return (s ?? "").replace(/[^A-Za-z]/g, "");
+}
+function upperFirst(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+function generateDisplayName(fullName: string, taken: Set<string>): string {
+  const tokens = fullName.trim().split(/\s+/).filter(Boolean);
+  const free = (c: string) => !taken.has(c.toLowerCase());
+
+  // Single-word name: no surname to build from — use the first name as-is.
+  if (tokens.length <= 1) {
+    const base = upperFirst(cleanAlpha(tokens[0] ?? "")) || "Player";
+    if (free(base)) return base;
+    let n = 2;
+    while (!free(base + n)) n++;
+    return base + n;
+  }
+
+  const firstInitial = (cleanAlpha(tokens[0])[0] ?? "").toUpperCase();
+  const surname = cleanAlpha(tokens[tokens.length - 1]);
+  // Extend from first-4 up to the full surname.
+  for (let len = Math.min(4, surname.length); len <= surname.length; len++) {
+    const cand = firstInitial + upperFirst(surname.slice(0, len));
+    if (free(cand)) return cand;
+  }
+  // Full surname exhausted and still colliding — append a number.
+  const full = firstInitial + upperFirst(surname);
+  let n = 2;
+  while (!free(full + n)) n++;
+  return full + n;
+}
+
 function validate(body: InvitePlayerRequest): { ok: true; data: {
-  display_name: string;
+  display_name: string | null;
+  full_name: string | null;
   email: string;
   send_invite: boolean;
   group_assignments: GroupAssignment[];
 } } | { ok: false; error: string } {
-  if (typeof body.display_name !== "string" || body.display_name.trim() === "") {
-    return { ok: false, error: "display_name is required" };
+  // display_name is OPTIONAL now: if omitted/blank the handler generates it
+  // from full_name via the canonical ladder. Either display_name or full_name
+  // must be present (the PWA new-player flow sends full_name only; the admin
+  // AddPlayerModal still sends a typed display_name).
+  const display_name =
+    typeof body.display_name === "string" && body.display_name.trim() !== ""
+      ? body.display_name.trim()
+      : null;
+  const full_name =
+    typeof body.full_name === "string" && body.full_name.trim() !== ""
+      ? body.full_name.trim()
+      : null;
+  if (!display_name && !full_name) {
+    return { ok: false, error: "display_name or full_name is required" };
   }
   if (typeof body.email !== "string" || body.email.trim() === "") {
     return { ok: false, error: "email is required" };
   }
-  const display_name = body.display_name.trim();
   const email = body.email.trim().toLowerCase();
   if (!EMAIL_RE.test(email)) {
     return { ok: false, error: "email format invalid" };
@@ -126,7 +188,7 @@ function validate(body: InvitePlayerRequest): { ok: true; data: {
     }
     group_assignments.push({ group_id: a.group_id, role: a.role });
   }
-  return { ok: true, data: { display_name, email, send_invite, group_assignments } };
+  return { ok: true, data: { display_name, full_name, email, send_invite, group_assignments } };
 }
 
 async function findExistingAuthUser(admin: SupabaseClient, email: string): Promise<string | null> {
@@ -182,7 +244,7 @@ serve(async (req) => {
   }
   const v = validate(body);
   if (!v.ok) return json({ error: v.error }, 400);
-  const { display_name, email, send_invite, group_assignments } = v.data;
+  const { display_name, full_name, email, send_invite, group_assignments } = v.data;
 
   // Service-role client for the writes — bypasses RLS so we can also write
   // user_id later via the trigger path, and so partial-failure rollback can
@@ -221,6 +283,17 @@ serve(async (req) => {
   // Order matters: the players row must exist BEFORE we call createUser so
   // that link_player_on_auth_signup (migration 020) finds a pending email
   // match when the auth.users INSERT trigger fires.
+  // Resolve the final display_name: use the caller's if provided, otherwise
+  // generate from full_name via the canonical ladder, deduped against all
+  // existing players.display_name (case-insensitive).
+  let finalDisplayName = display_name;
+  if (!finalDisplayName) {
+    const { data: existing, error: exErr } = await admin.from("players").select("display_name");
+    if (exErr) return json({ error: "Display-name generation failed", details: exErr.message }, 500);
+    const taken = new Set((existing ?? []).map((r) => String(r.display_name ?? "").toLowerCase()));
+    finalDisplayName = generateDisplayName(full_name!, taken);
+  }
+
   const playerId = newPlayerId();
   const nowIso = new Date().toISOString();
   const { data: playerInsert, error: pErr } = await admin
@@ -228,7 +301,8 @@ serve(async (req) => {
     .insert({
       id: playerId,
       user_id: null,
-      display_name,
+      display_name: finalDisplayName,
+      full_name,
       email,
       is_active: 1,
       is_super_admin: 0,
@@ -294,7 +368,7 @@ serve(async (req) => {
       const { error: createErr } = await admin.auth.admin.createUser({
         email,
         email_confirm: false,
-        user_metadata: { display_name },
+        user_metadata: { display_name: finalDisplayName },
       });
       if (createErr) {
         // Don't roll back the player; admin can re-trigger an invite from
