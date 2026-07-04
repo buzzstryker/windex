@@ -31,6 +31,15 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hasValidEmail = (email: string | null) =>
   !!email && EMAIL_RE.test(email.trim());
 
+/**
+ * Clipboard text for an invited-but-not-yet-signed-in player. Routes them to
+ * the player-initiated login-code flow (Email 2 of the two-email model) — no
+ * admin re-send email is involved.
+ */
+function buildSignInInstructions(email: string): string {
+  return `Go to windexgolf.com/login, enter your email (${email}), tap "Send Login Code", then check your email and enter the 6-digit code to sign in.`;
+}
+
 // ─── Status column ────────────────────────────────────────────────────────
 // Three-state derivation from players.user_id + the get_players_auth_status
 // RPC. Returns null when we don't have enough info yet (RPC still loading
@@ -50,7 +59,7 @@ function deriveStatus(
 
 const STATUS_PILL: Record<StatusKey, { label: string; color: string; bg: string; border: string }> = {
   not_invited: { label: 'not invited', color: '#616161', bg: '#f5f5f5', border: '#e0e0e0' },
-  invited:     { label: 'invited',     color: '#f57c00', bg: '#fff8e1', border: '#ffe0b2' },
+  invited:     { label: 'Invited — awaiting first sign-in', color: '#f57c00', bg: '#fff8e1', border: '#ffe0b2' },
   signed_in:   { label: 'signed in',   color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7' },
   retired:     { label: 'retired',     color: '#616161', bg: '#eeeeee', border: '#bdbdbd' },
 };
@@ -188,6 +197,17 @@ export function Players() {
       setSaveMsg(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCopyInstructions = async (target: PlayerWithMembership) => {
+    const text = buildSignInInstructions(target.email ?? '');
+    try {
+      await navigator.clipboard.writeText(text);
+      setToast('Sign-in instructions copied.');
+    } catch {
+      // Clipboard API blocked/unavailable — surface the text so it's never lost.
+      setToast(text);
     }
   };
 
@@ -413,6 +433,7 @@ export function Players() {
                       onSendInvite={() => { setInviteError(null); setInviteTarget(p); }}
                       onRetire={() => { setRetireMode('retire'); setRetireError(null); setRetireTarget(p); }}
                       onUnretire={() => { setRetireMode('unretire'); setRetireError(null); setRetireTarget(p); }}
+                      onCopyInstructions={() => handleCopyInstructions(p)}
                     />
               ))}
             </tbody>
@@ -432,6 +453,7 @@ function DisplayRow({
   onSendInvite,
   onRetire,
   onUnretire,
+  onCopyInstructions,
 }: {
   player: PlayerWithMembership;
   isSuperAdmin: boolean;
@@ -441,6 +463,7 @@ function DisplayRow({
   onSendInvite: () => void;
   onRetire: () => void;
   onUnretire: () => void;
+  onCopyInstructions: () => void;
 }) {
   const linked = p.user_id !== null && p.user_id !== undefined;
   const emailOk = hasValidEmail(p.email);
@@ -478,6 +501,16 @@ function DisplayRow({
             style={{ padding: '4px 10px', fontSize: 12, marginRight: 4, opacity: emailOk ? 1 : 0.55 }}
           >
             Send Invite
+          </button>
+        )}
+        {isSuperAdmin && status === 'invited' && (
+          <button
+            className="btn btn-secondary"
+            onClick={onCopyInstructions}
+            title="Copy sign-in instructions to send this player"
+            style={{ padding: '4px 10px', fontSize: 12, marginRight: 4 }}
+          >
+            Copy sign-in instructions
           </button>
         )}
         {isSuperAdmin && tab === 'active' && (
