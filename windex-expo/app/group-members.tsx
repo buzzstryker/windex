@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -110,6 +110,19 @@ export default function GroupMembersScreen() {
       setSaving(false);
     }
   };
+
+  // Membership state for the Add/Invite sheet: it needs to know, per matched
+  // player, whether they're already in THIS group (and whether that membership
+  // is inactive). listGroupMembers returns inactive rows too, so this covers
+  // all three states with no extra query. Rebuilt on every load() so the sheet
+  // flips to "Member of this group" right after a successful add.
+  const membershipByPlayerId = useMemo(
+    () =>
+      new Map(
+        members.map((m) => [m.player_id, { id: m.id, is_active: m.is_active, role: m.role }]),
+      ),
+    [members],
+  );
 
   const activeMembers = members.filter((m) => m.is_active === 1);
   const inactiveMembers = members.filter((m) => m.is_active !== 1);
@@ -242,6 +255,7 @@ export default function GroupMembersScreen() {
         visible={addOpen}
         groupId={group_id}
         groupName={group_name}
+        membershipByPlayerId={membershipByPlayerId}
         onClose={() => setAddOpen(false)}
         onChanged={load}
       />

@@ -10,6 +10,9 @@ export type PlayerLite = {
   full_name: string | null;
   email: string | null;
   user_id: string | null;
+  /** Non-null = retired/resigned (migration 029). Retired players are filtered
+   *  out of standings (migration 030); the sheet marks them but doesn't block. */
+  retired_at: string | null;
 };
 
 export type PlayerAuthStatus = {
@@ -54,7 +57,7 @@ export async function searchPlayers(q: string): Promise<PlayerLite[]> {
   const enc = encodeURIComponent(query);
   const or = `or=(display_name.ilike.*${enc}*,full_name.ilike.*${enc}*,email.ilike.*${enc}*)`;
   const res = await fetch(
-    `${base}/rest/v1/players?${or}&select=id,display_name,full_name,email,user_id&order=display_name.asc&limit=25`,
+    `${base}/rest/v1/players?${or}&select=id,display_name,full_name,email,user_id,retired_at&order=display_name.asc&limit=25`,
     { headers },
   );
   if (!res.ok) return [];
@@ -70,7 +73,7 @@ export async function findPlayerByEmail(email: string): Promise<PlayerLite | nul
   if (!base || !token) return null;
   const headers = { Authorization: `Bearer ${token}`, apikey: anonKey || token };
   const res = await fetch(
-    `${base}/rest/v1/players?email=eq.${encodeURIComponent(e)}&select=id,display_name,full_name,email,user_id&limit=1`,
+    `${base}/rest/v1/players?email=eq.${encodeURIComponent(e)}&select=id,display_name,full_name,email,user_id,retired_at&limit=1`,
     { headers },
   );
   if (!res.ok) return null;
@@ -96,6 +99,106 @@ export async function getPlayersAuthStatus(): Promise<Map<string, PlayerAuthStat
   } catch {
     return new Map();
   }
+}
+
+// ── Group membership writes ───────────────────────────────────────────────
+// RLS (`group_members_insert` / `group_members_update`, migration 015) is the
+// only gate: WITH CHECK/USING (am_i_super_admin() OR am_i_group_admin(group_id)).
+// No Edge Function or RPC handles add-existing — invite-player only assigns
+// groups at player-create time — so these go direct to PostgREST.
+//
+// Both follow the hardened write pattern (return=representation + a ≥1-row
+// assertion + the live session token), NOT the `return=minimal` shape of
+// `api.ts updateMembershipRest`, which cannot tell an RLS-filtered 0-row write
+// from a success. See BACKLOG.
+
+/**
+ * TWIN: keep identical to windex-api/supabase/functions/invite-player
+ * `groupMemberId()`. Matching the shape used by sync-glide-members.mjs and the
+ * seed bundle keeps us from creating duplicate-by-shape rows.
+ */
+function groupMemberId(groupId: string, playerId: string): string {
+  const safe = (x: string) => x.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+  return `gm_${safe(groupId)}_${safe(playerId)}`;
+}
+
+async function restWriteCtx() {
+  const { base, anonKey } = restCtx();
+  const token = await getStoredAccessToken();
+  if (!base) throw new Error('API base URL is not configured.');
+  if (!token) throw new Error('Session expired — sign in again.');
+  return {
+    base,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey || token,
+      Prefer: 'return=representation',
+    },
+  };
+}
+
+/**
+ * Insert a group_members row for an existing player. Throws on any failure —
+ * including a 2xx that changed no rows — so the caller can never report a
+ * silent half-success.
+ */
+export async function addPlayerToGroup(groupId: string, playerId: string): Promise<void> {
+  const { base, headers } = await restWriteCtx();
+  const res = await fetch(`${base}/rest/v1/group_members`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      id: groupMemberId(groupId, playerId),
+      group_id: groupId,
+      player_id: playerId,
+      role: 'member',
+      is_active: 1,
+      joined_at: new Date().toISOString(),
+    }),
+  });
+  if (res.status === 409) {
+    // UNIQUE(group_id, player_id) — a row appeared since the sheet loaded.
+    throw new Error('They are already in this group — refresh to see them.');
+  }
+  if (!res.ok) throw new Error(await restError(res, 'Failed to add player to group'));
+  const rows = await res.json().catch(() => []);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Add returned no row — check permissions and try again.');
+  }
+}
+
+/**
+ * Reactivate an existing (inactive) membership. Sends `is_active` ONLY: role
+ * and joined_at are preserved so this reads as the same membership resuming.
+ * NOTE: group_members has no updated_at column (migration 001) — sending one
+ * would 400.
+ */
+export async function reactivateMembership(membershipId: string): Promise<void> {
+  const { base, headers } = await restWriteCtx();
+  const res = await fetch(
+    `${base}/rest/v1/group_members?id=eq.${encodeURIComponent(membershipId)}`,
+    { method: 'PATCH', headers, body: JSON.stringify({ is_active: 1 }) },
+  );
+  if (!res.ok) throw new Error(await restError(res, 'Failed to reactivate membership'));
+  const rows = await res.json().catch(() => []);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    // The landmine this pattern exists to catch: PostgREST returns 2xx for an
+    // RLS-filtered / not-found PATCH that touched nothing.
+    throw new Error('Reactivate changed no row — check permissions and try again.');
+  }
+}
+
+/** Best-effort PostgREST error message extraction. */
+async function restError(res: Response, fallback: string): Promise<string> {
+  const text = await res.text().catch(() => '');
+  try {
+    const j = JSON.parse(text) as { message?: string };
+    if (j?.message) return `${fallback}: ${j.message}`;
+  } catch {
+    /* fall through */
+  }
+  return `${fallback} (HTTP ${res.status})`;
 }
 
 export type SendInviteResult = {

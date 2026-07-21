@@ -14,12 +14,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError } from '@/lib/api';
 import {
+  addPlayerToGroup,
   buildSignInInstructions,
   copyToClipboard,
   createPlayer,
   deriveInviteStatus,
   findPlayerByEmail,
   getPlayersAuthStatus,
+  reactivateMembership,
   searchPlayers,
   sendInvite,
   type InviteStatus,
@@ -36,15 +38,41 @@ const PILL: Record<InviteStatus, { label: string; color: string; bg: string }> =
   signed_in: { label: 'Signed in', color: '#2E7D32', bg: '#E8F5E9' },
 };
 
+/** One group_members row, as the parent's members list already has it. */
+export type MembershipLite = { id: string; is_active: number; role: string };
+
+/**
+ * Is a matched player in THIS group? 'unknown' when the parent didn't supply
+ * membership data — the sheet then falls back to invite-only actions rather
+ * than guessing "not a member" and offering a bogus Add.
+ */
+type MembershipState = 'member' | 'inactive' | 'none' | 'unknown';
+
+type PendingAction = {
+  player: PlayerLite;
+  kind: 'add' | 'reactivate';
+  membershipId?: string;
+  withInvite: boolean;
+};
+
 type Props = {
   visible: boolean;
   groupId: string;
   groupName?: string;
+  /** player_id → their group_members row for this group. Absent → invite-only. */
+  membershipByPlayerId?: Map<string, MembershipLite>;
   onClose: () => void;
   onChanged: () => void;
 };
 
-export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onChanged }: Props) {
+export function AddInvitePlayerSheet({
+  visible,
+  groupId,
+  groupName,
+  membershipByPlayerId,
+  onClose,
+  onChanged,
+}: Props) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<'search' | 'new'>('search');
   const [query, setQuery] = useState('');
@@ -60,6 +88,16 @@ export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onC
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+
+  const groupLabel = groupName ? decodeURIComponent(groupName) : 'this group';
+
+  const membershipOf = (p: PlayerLite): MembershipState => {
+    if (!membershipByPlayerId) return 'unknown';
+    const m = membershipByPlayerId.get(p.id);
+    if (!m) return 'none';
+    return m.is_active === 1 ? 'member' : 'inactive';
+  };
 
   // Reset when opened; load auth status once.
   useEffect(() => {
@@ -74,6 +112,7 @@ export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onC
     setBusy(false);
     setNotice(null);
     setError(null);
+    setPending(null);
     getPlayersAuthStatus().then(setAuthStatus).catch(() => setAuthStatus(new Map()));
   }, [visible]);
 
@@ -112,6 +151,47 @@ export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onC
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to send invite');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Execute a confirmed add / reactivate, then (optionally) the invite.
+   * Partial-failure handling mirrors handleCreate: if the membership write
+   * succeeds and the invite fails, that is surfaced loudly and is recoverable
+   * from search (the card now shows a Send Invite action). If the membership
+   * write fails, the invite is never attempted — nothing half-done.
+   */
+  const handleConfirmPending = async () => {
+    if (!pending) return;
+    const { player: p, kind, membershipId, withInvite } = pending;
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      if (kind === 'add') {
+        await addPlayerToGroup(groupId, p.id);
+      } else {
+        if (!membershipId) throw new Error('Missing membership row — refresh and try again.');
+        await reactivateMembership(membershipId);
+      }
+      const done = kind === 'add' ? `Added ${p.display_name} to` : `Reactivated ${p.display_name} in`;
+      if (withInvite) {
+        try {
+          await sendInvite(p.id);
+          setNotice(`${done} ${groupLabel} and sent an invite to ${p.email ?? p.display_name}.`);
+        } catch (e) {
+          const why = e instanceof Error ? e.message : 'unknown error';
+          setNotice(`${done} ${groupLabel} — invite failed: ${why}. Find them in search to retry Send Invite.`);
+        }
+      } else {
+        setNotice(`${done} ${groupLabel}.`);
+      }
+      setPending(null);
+      onChanged();
+      await refreshStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update membership');
+      setPending(null);
     } finally {
       setBusy(false);
     }
@@ -181,18 +261,68 @@ export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onC
     const status = deriveInviteStatus(p.user_id, authStatus.get(p.id));
     const pill = PILL[status];
     const emailOk = EMAIL_RE.test(p.email ?? '');
+    const membership = membershipOf(p);
+    const row = membershipByPlayerId?.get(p.id);
+    // Only a never-invited player gets the invite paired onto the add, and only
+    // if we have an address to send to. Without one the add still proceeds —
+    // a missing email must not block getting them into the group.
+    const withInvite = status === 'not_invited' && emailOk;
+    const canJoin = membership === 'none' || membership === 'inactive';
+    const joinLabel =
+      membership === 'inactive'
+        ? withInvite ? 'Reactivate & Send Invite' : `Reactivate in ${groupLabel}`
+        : withInvite ? 'Add & Send Invite' : `Add to ${groupLabel}`;
+
     return (
       <View key={p.id} style={styles.matchCard}>
         <View style={{ flex: 1 }}>
           <Text style={styles.matchName}>{p.display_name}</Text>
           {p.full_name ? <Text style={styles.matchSub}>{p.full_name}</Text> : null}
           {p.email ? <Text style={styles.matchSub}>{p.email}</Text> : null}
+          {membership !== 'unknown' && (
+            <Text
+              style={[
+                styles.membershipLine,
+                membership === 'member' && styles.membershipIn,
+                membership === 'inactive' && styles.membershipWas,
+              ]}
+            >
+              {membership === 'member'
+                ? 'Member of this group'
+                : membership === 'inactive'
+                  ? 'Previously in this group (inactive)'
+                  : 'Not in this group'}
+            </Text>
+          )}
+          {p.retired_at ? <Text style={styles.retiredLine}>Retired</Text> : null}
           <View style={[styles.pill, { backgroundColor: pill.bg }]}>
             <Text style={[styles.pillText, { color: pill.color }]}>{pill.label}</Text>
           </View>
+          {canJoin && status === 'not_invited' && !emailOk ? (
+            <Text style={styles.matchNote}>No valid email — they can be added, but not invited.</Text>
+          ) : null}
         </View>
         <View style={styles.matchActions}>
-          {status === 'not_invited' && (
+          {canJoin && (
+            <Pressable
+              style={[styles.smallBtn, styles.primaryBtn, busy && { opacity: 0.5 }]}
+              onPress={busy ? undefined : () => {
+                setError(null); setNotice(null);
+                setPending({
+                  player: p,
+                  kind: membership === 'inactive' ? 'reactivate' : 'add',
+                  membershipId: row?.id,
+                  withInvite,
+                });
+              }}
+            >
+              <Text style={styles.primaryBtnText}>{joinLabel}</Text>
+            </Pressable>
+          )}
+          {/* Invite-only actions. Send Invite is the primary only for a player
+              already in this group (or when membership is unknown) — otherwise
+              the add above carries the invite. */}
+          {!canJoin && status === 'not_invited' && (
             <Pressable
               style={[styles.smallBtn, styles.primaryBtn, (!emailOk || busy) && { opacity: 0.5 }]}
               onPress={emailOk && !busy ? () => handleSendInvite(p) : undefined}
@@ -201,10 +331,55 @@ export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onC
             </Pressable>
           )}
           {status === 'invited' && (
-            <Pressable style={[styles.smallBtn, styles.secondaryBtn]} onPress={() => handleCopy(p)}>
+            <Pressable style={[styles.smallBtn, styles.secondaryBtn, canJoin && { marginTop: 8 }]} onPress={() => handleCopy(p)}>
               <Text style={styles.secondaryBtnText}>Copy sign-in instructions</Text>
             </Pressable>
           )}
+        </View>
+      </View>
+    );
+  };
+
+  /**
+   * Confirmation lives INSIDE the sheet rather than in a nested <Modal>:
+   * this component is already a Modal, and stacking a second one is unreliable
+   * on RN-web / the PWA. Cancel returns to the results list untouched.
+   */
+  const renderConfirm = (act: PendingAction) => {
+    const { player: p, kind, withInvite } = act;
+    const verb = kind === 'reactivate' ? 'Reactivate' : 'Add';
+    const prep = kind === 'reactivate' ? 'in' : 'to';
+    return (
+      <View style={styles.confirmPanel}>
+        <Text style={styles.confirmTitle}>{`${verb} ${p.display_name} ${prep} ${groupLabel}?`}</Text>
+        <Text style={styles.confirmSub}>
+          {[p.full_name, p.email].filter(Boolean).join(' · ') || p.display_name}
+        </Text>
+        {kind === 'reactivate' ? (
+          <Text style={styles.confirmNote}>Their original join date and role are kept.</Text>
+        ) : null}
+        {withInvite ? (
+          <Text style={styles.confirmNote}>{`An invite email will also be sent to ${p.email}.`}</Text>
+        ) : null}
+        {p.retired_at ? (
+          <Text style={styles.confirmWarn}>This player is retired — they won’t appear in standings.</Text>
+        ) : null}
+        <View style={styles.confirmRow}>
+          <Pressable
+            style={[styles.smallBtn, styles.secondaryBtn, styles.confirmBtn]}
+            onPress={busy ? undefined : () => setPending(null)}
+          >
+            <Text style={styles.secondaryBtnText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.smallBtn, styles.primaryBtn, styles.confirmBtn, busy && { opacity: 0.6 }]}
+            onPress={busy ? undefined : handleConfirmPending}
+            disabled={busy}
+          >
+            <Text style={styles.primaryBtnText}>
+              {busy ? 'Working…' : `${verb} ${prep === 'in' ? 'in' : 'to'} ${groupLabel}`}
+            </Text>
+          </Pressable>
         </View>
       </View>
     );
@@ -226,7 +401,9 @@ export function AddInvitePlayerSheet({ visible, groupId, groupName, onClose, onC
           {notice ? <View style={styles.noticeBox}><Text style={styles.noticeText}>{notice}</Text></View> : null}
           {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
 
-          {mode === 'search' ? (
+          {pending ? (
+            renderConfirm(pending)
+          ) : mode === 'search' ? (
             <>
               <TextInput
                 style={styles.input}
@@ -312,7 +489,19 @@ const styles = StyleSheet.create({
   matchSub: { fontSize: 13, color: '#8E8E93', marginTop: 1 },
   pill: { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, marginTop: 6 },
   pillText: { fontSize: 11, fontWeight: '600' },
+  membershipLine: { fontSize: 12, fontWeight: '600', color: '#8E8E93', marginTop: 4 },
+  membershipIn: { color: '#2E7D32' },
+  membershipWas: { color: '#B26A00' },
+  retiredLine: { fontSize: 12, fontWeight: '600', color: '#C62828', marginTop: 2 },
+  matchNote: { fontSize: 11, color: '#8E8E93', marginTop: 6 },
   matchActions: { justifyContent: 'center' },
+  confirmPanel: { paddingVertical: 12 },
+  confirmTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
+  confirmSub: { fontSize: 14, color: '#8E8E93', marginTop: 6 },
+  confirmNote: { fontSize: 13, color: '#666', marginTop: 10 },
+  confirmWarn: { fontSize: 13, color: '#C62828', fontWeight: '600', marginTop: 10 },
+  confirmRow: { flexDirection: 'row', gap: 10, marginTop: 22 },
+  confirmBtn: { flex: 1, paddingVertical: 13, maxWidth: undefined },
   smallBtn: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
   primaryBtn: { backgroundColor: OLIVE },
   primaryBtnText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
