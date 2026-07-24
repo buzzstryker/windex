@@ -40,7 +40,12 @@ function json(body: unknown, status: number) {
   });
 }
 
-const MODEL = "claude-sonnet-4-20250514";
+// claude-sonnet-4-20250514 was retired on 2026-06-15 and began returning 404
+// not-found, which surfaced as the generic "Commentary generation failed" at
+// stage 1 (the last successful run is the retirement date itself). Opus 4.8
+// runs WITHOUT thinking when the `thinking` field is omitted, so the request
+// shape below needs no other change.
+const MODEL = "claude-opus-4-8";
 
 // Fact-check pass (stage 2). sonar-pro is Perplexity's grounded search model
 // (web search + citations) — verified against the current Perplexity model
@@ -634,10 +639,13 @@ serve(async (req) => {
   // SYSTEM_PROMPT (tone) is unchanged. Output is collected via a forced
   // tool call (submit_broadcast_notes) so the structured payload is guaranteed
   // well-formed JSON from the API — no text parsing, no fence stripping, and
-  // none of the malformed/partial-JSON failure classes. max_tokens is 8000 so
-  // a full prose+claims response has comfortable headroom (4000 truncated in
-  // production). Stage-1 failures return WITHOUT an audit write (fact-check
-  // never ran → NULL).
+  // none of the malformed/partial-JSON failure classes. max_tokens is 16000:
+  // 4000 truncated in production and 8000 was sized against the retired Sonnet
+  // 4 tokenizer, which counted the same text more cheaply than the current one
+  // — so the old budget is tighter than it looks. 16000 stays under the
+  // threshold where a non-streaming request risks an HTTP timeout, so the call
+  // shape is unchanged. Stage-1 failures return WITHOUT an audit write
+  // (fact-check never ran → NULL).
   const stage1Prompt =
 `Context: a ${groupName} playoff broadcast.
 
@@ -691,7 +699,7 @@ ${JSON.stringify(payload, null, 2)}
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 8000,
+        max_tokens: 16000,
         system: SYSTEM_PROMPT,
         tools: [submitNotesTool],
         tool_choice: { type: "tool", name: "submit_broadcast_notes" },
@@ -840,7 +848,7 @@ Apply the corrections you agree with. Preserve your original voice and energy. T
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 8000,
+        max_tokens: 16000,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: stage3Prompt }],
       }),
