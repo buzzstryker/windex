@@ -48,7 +48,30 @@ export function Groups() {
   if (error) return <ErrorState message={error} onRetry={load} />;
 
   const columns = [
-    { key: 'name', label: 'Group name' },
+    {
+      key: 'name',
+      label: 'Group name',
+      render: (r: Group) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {r.name}
+          {r.group_type === 'roster' && (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: '#B26A00',
+                background: '#FFF3E0',
+                borderRadius: 6,
+                padding: '1px 7px',
+                letterSpacing: 0.3,
+              }}
+            >
+              Roster
+            </span>
+          )}
+        </span>
+      ),
+    },
     {
       key: 'id',
       label: '',

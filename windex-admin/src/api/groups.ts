@@ -28,7 +28,9 @@ function restHeaders(extra?: Record<string, string>): Record<string, string> {
 export async function listGroups(): Promise<Group[]> {
   try {
     const data = await apiFetch<{ groups?: Group[]; data?: Group[] }>('/groups');
-    return (data as { groups?: Group[] })?.groups ?? (data as { data?: Group[] })?.data ?? [];
+    const rows = (data as { groups?: Group[] })?.groups ?? (data as { data?: Group[] })?.data ?? [];
+    // Missing group_type (pre-052 API) → 'league', so nothing is mis-shown as a roster.
+    return rows.map((g) => ({ ...g, group_type: g.group_type ?? 'league' }));
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return [];
     throw e;

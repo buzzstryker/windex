@@ -158,7 +158,11 @@ export function CupChampions() {
     Promise.all([isCurrentUserSuperAdmin(), listGroups()])
       .then(([admin, gs]) => {
         setIsSuperAdmin(admin);
-        const sorted = [...gs].sort((a, b) => a.name.localeCompare(b.name));
+        // Rosters can't have a Cup champion — exclude them from this picker
+        // (migration 052). Other admin surfaces still list rosters.
+        const sorted = gs
+          .filter((g) => g.group_type !== 'roster')
+          .sort((a, b) => a.name.localeCompare(b.name));
         setGroups(sorted);
         if (sorted.length > 0) {
           // Prefer Windex Cup (has all the historical backfill data); fall

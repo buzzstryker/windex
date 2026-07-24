@@ -97,6 +97,9 @@ export interface Group {
   logo_url?: string | null;
   season_start_month?: number;
   dollars_per_point?: number | null;
+  /** 'league' = a playing group; 'roster' = a prospect pool (migration 052).
+   *  Admin shows both (rosters get a badge); league-only ops exclude rosters. */
+  group_type?: 'league' | 'roster';
 }
 
 /** Season. */
