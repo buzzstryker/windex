@@ -68,6 +68,10 @@ export type Group = {
   section_id?: string | null;
   logo_url?: string | null;
   dollars_per_point?: number | null;
+  /** 'league' = a playing group (player-visible); 'roster' = a prospect pool
+   *  (hidden from players, browsable by super-admins). Migration 052. Defaults
+   *  to 'league' when absent so a pre-052 API response never reads as a roster. */
+  group_type: 'league' | 'roster';
 };
 export type Section = { id: string; name: string };
 
@@ -86,7 +90,9 @@ export type Season = {
 export async function listGroups(): Promise<Group[]> {
   try {
     const data = await apiFetch<{ groups?: Group[] }>('/groups');
-    return data.groups ?? [];
+    // Defensive: an old /groups deploy (pre-052) omits group_type — treat a
+    // missing value as 'league' so nothing is accidentally hidden as a roster.
+    return (data.groups ?? []).map((g) => ({ ...g, group_type: g.group_type ?? 'league' }));
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return [];
     throw e;

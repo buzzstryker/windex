@@ -371,6 +371,15 @@ export default function StandingsScreen() {
 
       {groupLoading || loadingStandings ? (
         <ActivityIndicator style={styles.spinner} size="large" />
+      ) : !selectedGroup && !error ? (
+        // Defensive: no selectable league resolved. Unreachable for any current
+        // signed-in user (every one holds a league membership), but a roster-
+        // only future user would land here rather than on a blank screen.
+        // context `loading` stays true until selectedGroup resolves or groups
+        // is empty, so this never flashes during a normal load.
+        <ThemedText style={[styles.empty, { color: muted }]}>
+          You’re not in an active league yet.{'\n'}Ask an admin to add you to a group.
+        </ThemedText>
       ) : (selectedSeason || isAllTime) && standings.length === 0 && !error ? (
         <ThemedText style={[styles.empty, { color: muted }]}>
           No standings data.

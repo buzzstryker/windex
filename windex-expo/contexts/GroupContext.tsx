@@ -17,7 +17,14 @@ import { logUserEvent } from '@/lib/userEvents';
 type GroupWithSection = Group & { sectionName?: string };
 
 type GroupContextValue = {
+  /** LEAGUE groups only — the player-visible universe. Rosters are excluded
+   *  here (migration 052) so every consumer of `groups` (switcher, drawer,
+   *  default resolution, myGroups) hides them automatically. Rosters live in
+   *  `rosterGroups`. */
   groups: GroupWithSection[];
+  /** ROSTER groups (prospect pools). Super-admin-only surface: the browse-a-
+   *  roster picker in AddInvitePlayerSheet. Never shown as a selectable group. */
+  rosterGroups: GroupWithSection[];
   /** Groups the current user is an active member of, sorted by group_members.joined_at DESC (most-recently-joined first). */
   myGroups: GroupWithSection[];
   sections: Section[];
@@ -47,6 +54,7 @@ const GroupContext = createContext<GroupContextValue | null>(null);
 export function GroupProvider({ children }: { children: React.ReactNode }) {
   const { signedIn, ready, userId } = useAuth();
   const [groups, setGroups] = useState<GroupWithSection[]>([]);
+  const [rosterGroups, setRosterGroups] = useState<GroupWithSection[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<GroupWithSection | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -223,7 +231,12 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
         ...grp,
         sectionName: grp.section_id ? sectionMap.get(grp.section_id) ?? undefined : undefined,
       }));
-      setGroups(enriched);
+      // Split by type: `groups` carries LEAGUES only (the player-visible
+      // universe — this is the single filter point that keeps rosters out of
+      // the switcher, drawer, default resolution, and myGroups). Rosters go to
+      // `rosterGroups` for the super-admin browse picker. Migration 052.
+      setGroups(enriched.filter((grp) => grp.group_type !== 'roster'));
+      setRosterGroups(enriched.filter((grp) => grp.group_type === 'roster'));
       setSections(s);
     } catch {
       // silent
@@ -238,6 +251,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
       loadGroups();
     } else if (ready && !signedIn) {
       setGroups([]);
+      setRosterGroups([]);
       setSections([]);
       setSelectedGroup(null);
       setSeasons([]);
@@ -366,6 +380,7 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
     <GroupContext.Provider
       value={{
         groups,
+        rosterGroups,
         myGroups,
         sections,
         selectedGroup,

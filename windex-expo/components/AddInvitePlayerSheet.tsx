@@ -76,7 +76,7 @@ export function AddInvitePlayerSheet({
   onChanged,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { groups } = useGroup();
+  const { groups, rosterGroups } = useGroup();
   const [mode, setMode] = useState<'search' | 'new' | 'browse'>('search');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlayerLite[]>([]);
@@ -146,8 +146,13 @@ export function AddInvitePlayerSheet({
     return () => { cancelled = true; };
   }, [visible, mode, sourceGroupId]);
 
-  const sourceGroups = groups.filter((g) => g.id !== groupId);
-  const sourceGroupName = sourceGroups.find((g) => g.id === sourceGroupId)?.name ?? 'this roster';
+  // Source options for the browse picker: rosters first (that's what the
+  // feature is for), then other leagues (a super-admin can still pull a player
+  // from another playing group). Current group excluded from both.
+  const sourceRosters = rosterGroups.filter((g) => g.id !== groupId);
+  const sourceLeagues = groups.filter((g) => g.id !== groupId);
+  const sourceGroupName =
+    [...sourceRosters, ...sourceLeagues].find((g) => g.id === sourceGroupId)?.name ?? 'this roster';
   // Prospects = source-roster members not already in the current group (active
   // or inactive). Filtered live against membershipByPlayerId so adds self-prune.
   const rosterProspects = candidates.filter((p) => !membershipByPlayerId?.has(p.id));
@@ -492,19 +497,41 @@ export function AddInvitePlayerSheet({
                 <>
                   <Text style={styles.fieldLabel}>Pick a roster to browse for players to add to {groupLabel}.</Text>
                   <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
-                    {sourceGroups.length === 0 ? (
+                    {sourceRosters.length === 0 && sourceLeagues.length === 0 ? (
                       <Text style={styles.hint}>No other groups to browse.</Text>
                     ) : (
-                      sourceGroups.map((g) => (
-                        <Pressable
-                          key={g.id}
-                          style={styles.rosterRow}
-                          onPress={() => { setError(null); setNotice(null); setSourceGroupId(g.id); }}
-                        >
-                          <Text style={styles.rosterRowText}>{g.name}</Text>
-                          <Text style={styles.rosterRowChevron}>{'›'}</Text>
-                        </Pressable>
-                      ))
+                      <>
+                        {sourceRosters.length > 0 && (
+                          <>
+                            <Text style={styles.sourceSectionLabel}>ROSTERS</Text>
+                            {sourceRosters.map((g) => (
+                              <Pressable
+                                key={g.id}
+                                style={styles.rosterRow}
+                                onPress={() => { setError(null); setNotice(null); setSourceGroupId(g.id); }}
+                              >
+                                <Text style={styles.rosterRowText}>{g.name}</Text>
+                                <Text style={styles.rosterRowChevron}>{'›'}</Text>
+                              </Pressable>
+                            ))}
+                          </>
+                        )}
+                        {sourceLeagues.length > 0 && (
+                          <>
+                            <Text style={styles.sourceSectionLabel}>LEAGUES</Text>
+                            {sourceLeagues.map((g) => (
+                              <Pressable
+                                key={g.id}
+                                style={styles.rosterRow}
+                                onPress={() => { setError(null); setNotice(null); setSourceGroupId(g.id); }}
+                              >
+                                <Text style={styles.rosterRowText}>{g.name}</Text>
+                                <Text style={styles.rosterRowChevron}>{'›'}</Text>
+                              </Pressable>
+                            ))}
+                          </>
+                        )}
+                      </>
                     )}
                   </ScrollView>
                 </>
@@ -584,6 +611,7 @@ const styles = StyleSheet.create({
   hint: { color: '#8E8E93', fontSize: 13, marginTop: 12, textAlign: 'center' },
   browseLink: { alignSelf: 'flex-start', paddingVertical: 6 },
   browseLinkText: { color: OLIVE, fontSize: 14, fontWeight: '600' },
+  sourceSectionLabel: { fontSize: 12, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.5, marginTop: 8, marginBottom: 6 },
   rosterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 8 },
   rosterRowText: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
   rosterRowChevron: { fontSize: 22, color: '#8E8E93' },
