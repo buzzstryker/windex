@@ -68,6 +68,45 @@ function stripJsonFence(text: string): string {
   return m ? m[1].trim() : t;
 }
 
+// Perplexity sometimes returns a complete, valid JSON array followed by
+// trailing prose (a citation footnote, a "Here's the analysis:" wrapper split
+// across the front, etc.). JSON.parse over the whole string then throws
+// "Unexpected non-whitespace character after JSON at position N" AFTER having
+// parsed a perfectly good array — the fact-check succeeded and we threw it
+// away on a formatting technicality (observed 2026-07-24: a valid 33-item
+// array, parse died at position 5730 on the char right after the closing ]).
+// stripJsonFence only helps when a fence wraps the ENTIRE string, so it can't
+// save this case. Extract the first balanced top-level JSON array instead:
+// find the first '[', then walk forward tracking bracket depth while
+// respecting string literals and their escapes, and return the slice through
+// the matching ']'. Trailing prose after that ']' is ignored; a leading
+// preamble before the '[' is skipped; a ```json-fenced array works too (the
+// scan simply starts at the '[' inside the fence and stops at its ']').
+// Returns null if there is no '[' or the array never closes (truncation).
+function extractFirstJsonArray(text: string): string | null {
+  const start = text.indexOf("[");
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "[") depth++;
+    else if (ch === "]") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null; // array opened but never closed (e.g. a truncated response)
+}
+
 const SYSTEM_PROMPT =
 `You are a senior sports broadcaster prepping playoff commentary for a recurring private golf points league. Surface specific, quotable, stat-grounded angles a play-by-play announcer and color commentator would use.
 
@@ -620,6 +659,11 @@ serve(async (req) => {
         player_ids: spotlight.map((p) => p.player_id as string),
         spotlight_names: spotlightNames,
         input_hash: inputHash,
+        // `notes` holds the stage-1 prose until stage 3 overwrites it on success,
+        // so persisting it here means a stage-2/3 hard-fail no longer destroys a
+        // good generation: the row keeps the stage-1 prose to recover. On success
+        // it's the stage-3 revised prose. output_length stays in sync either way.
+        notes: notes,
         output_length: notes.length,
         generation_ms: generationMs,
         model: MODEL,
@@ -794,31 +838,50 @@ ${JSON.stringify(claims, null, 2)}
       if (!res.ok) {
         const reason = `Perplexity API returned ${res.status}`;
         console.error("Stage 2 (Perplexity) HTTP error:", res.status, pplxText.slice(0, 500));
-        await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason });
-        return json({ error: `Fact-check failed: ${reason}. Retry or re-run without fact-check.`, perplexity_error: pplxText.slice(0, 500) }, 502);
+        await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason, raw_excerpt: pplxText.slice(0, 2000) });
+        return json({ error: `Fact-check failed: ${reason}. The run was logged — retry when the issue is resolved.`, perplexity_error: pplxText.slice(0, 500) }, 502);
       }
     } catch (e) {
       const aborted = (e as { name?: string })?.name === "AbortError";
       const reason = aborted ? `timed out after ${FACT_CHECK_TIMEOUT_MS / 1000}s` : (e instanceof Error ? e.message : String(e));
       console.error("Stage 2 (Perplexity) failed:", reason);
       await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason });
-      return json({ error: `Fact-check failed: ${reason}. Retry or re-run without fact-check.`, perplexity_error: reason }, 502);
+      return json({ error: `Fact-check failed: ${reason}. The run was logged — retry when the issue is resolved.`, perplexity_error: reason }, 502);
     } finally {
       clearTimeout(timer);
     }
 
     // Parse the OpenAI-compatible envelope, then the JSON array inside it.
+    // rawExcerpt/parseErr are hoisted so the catch can persist what actually
+    // came back — see the audit note below.
+    let rawExcerpt = "";
     try {
       const pj = JSON.parse(pplxText) as { choices?: { message?: { content?: string } }[] };
       const content = pj.choices?.[0]?.message?.content ?? "";
-      const arr = JSON.parse(stripJsonFence(content));
+      // The model's own output is the useful excerpt (the envelope almost
+      // always parses; it's the content that malforms). Fall back to the whole
+      // response below if even the envelope failed.
+      rawExcerpt = content.slice(0, 2000);
+      // Prefer the first balanced array; fall back to fence-stripping only if
+      // there's no bracketed array at all (then JSON.parse throws a clear
+      // error the catch records).
+      const arr = JSON.parse(extractFirstJsonArray(content) ?? stripJsonFence(content));
       if (!Array.isArray(arr)) throw new Error("fact-check result is not a JSON array");
       annotations = arr as Annotation[];
     } catch (e) {
       const reason = "Perplexity returned malformed JSON";
-      console.error("Stage 2 (Perplexity) malformed response:", e instanceof Error ? e.message : String(e), "\nRAW:", pplxText.slice(0, 2000));
-      await writeAudit({ annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL, generated_at: generatedAt, error: reason });
-      return json({ error: `Fact-check failed: ${reason}. Retry or re-run without fact-check.`, perplexity_error: pplxText.slice(0, 500) }, 502);
+      const parseErr = e instanceof Error ? e.message : String(e); // carries the "at position N" offset
+      if (!rawExcerpt) rawExcerpt = pplxText.slice(0, 2000); // envelope itself failed
+      console.error("Stage 2 (Perplexity) malformed response:", parseErr, "\nRAW:", rawExcerpt);
+      // Persist the raw excerpt + parse error onto the audit row so a future
+      // diagnosis reads it straight from broadcast_notes_log instead of racing
+      // the ~1-week function-log retention. Both live inside the fact_check_audit
+      // jsonb (no schema change); the parse offset is inside parse_error.
+      await writeAudit({
+        annotations: [], perplexity_model: PERPLEXITY_MODEL, claude_model: MODEL,
+        generated_at: generatedAt, error: reason, parse_error: parseErr, raw_excerpt: rawExcerpt,
+      });
+      return json({ error: `Fact-check failed: ${reason}. The run was logged — retry when the issue is resolved.`, perplexity_error: rawExcerpt.slice(0, 500) }, 502);
     }
   }
 
