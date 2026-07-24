@@ -94,16 +94,19 @@ export default function GroupMembersScreen() {
         venmo_handle: editVenmo || null,
         is_active: editActive,
       });
-      const memberOk = await updateMembershipRest(editMember.id, {
-        is_active: editActive,
-      });
-      if (playerOk && memberOk) {
-        setSaveMsg('Saved');
-        setEditMember(null);
-        load();
-      } else {
+      if (!playerOk) {
         setSaveMsg('Save failed — check permissions');
+        return;
       }
+      // Throws on a 0-row / RLS-filtered write (hardened, no longer a silent
+      // "Saved"); the catch below surfaces the message. Note: this is a second
+      // sequential write — if it fails after the player update succeeded, the
+      // player row persisted but the membership didn't. The error is loud and
+      // the modal stays open to retry (see BACKLOG for the transactional seam).
+      await updateMembershipRest(editMember.id, { is_active: editActive });
+      setSaveMsg('Saved');
+      setEditMember(null);
+      load();
     } catch (e) {
       setSaveMsg(e instanceof Error ? e.message : 'Save failed');
     } finally {

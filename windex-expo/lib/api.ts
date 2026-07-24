@@ -233,20 +233,46 @@ export async function updatePlayerRest(playerId: string, updates: Record<string,
   return Array.isArray(rows) && rows.length > 0;
 }
 
-export async function updateMembershipRest(membershipId: string, updates: Record<string, unknown>): Promise<boolean> {
+/**
+ * PATCH a group_members row by id, authenticated as the current user. Like
+ * updatePlayerRest, authorization is RLS: `group_members_update` (migration
+ * 015) allows a super admin or the group's admin to update the row.
+ *
+ * Hardened against the silent-0-row landmine (was `return=minimal` + `res.ok`,
+ * so an RLS-filtered / id-not-found PATCH returned 2xx and read as a save that
+ * never happened). Now `return=representation` + a ≥1-row assertion, throwing
+ * on failure — matching windex-admin's updateMembership and playerInvite.ts's
+ * membership writes. NOTE: body carries NO updated_at — group_members has no
+ * such column (migration 001), unlike players; adding one would 400.
+ *
+ * Throws (rather than returning a boolean) so the specific 0-row message can
+ * reach the caller's UI; the sole caller (group-members edit modal) surfaces it
+ * via its existing try/catch.
+ */
+export async function updateMembershipRest(membershipId: string, updates: Record<string, unknown>): Promise<void> {
   const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
   const token = await getAccessToken();
-  if (!base || !token) return false;
+  if (!base) throw new Error('API base URL is not configured.');
+  if (!token) throw new Error('Session expired — sign in again.');
   const anonKey = getSupabaseAnonKey();
   const res = await fetch(
     `${base}/rest/v1/group_members?id=eq.${encodeURIComponent(membershipId)}`,
     {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: anonKey || token, Prefer: 'return=minimal' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: anonKey || token, Prefer: 'return=representation' },
       body: JSON.stringify(updates),
     }
   );
-  return res.ok;
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Failed to update membership: ${res.status} ${text}`);
+  }
+  // A PATCH matching 0 rows (RLS-filtered or id not found) returns 200 with an
+  // empty array. Surface it instead of reporting a false "Saved".
+  const rows = await res.json().catch(() => null);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Nothing was saved — the membership was not found or you do not have permission to edit it.');
+  }
 }
 
 export type PlayerNames = {
