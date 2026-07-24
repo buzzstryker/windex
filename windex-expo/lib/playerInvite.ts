@@ -64,6 +64,41 @@ export async function searchPlayers(q: string): Promise<PlayerLite[]> {
   return res.json();
 }
 
+/**
+ * Roster candidates: every player in a source group, as PlayerLite (with
+ * user_id + retired_at, which listGroupMembers' PlayerDetail lacks). Used by
+ * the sheet's "browse a roster" mode to surface prospects from another group.
+ *
+ * INCLUDES inactive source memberships — an inactive Wednesday-roster member is
+ * still a valid prospect to add to the current group. group_members has no FK
+ * to players, so this is a two-query client join (same shape as
+ * api.ts listGroupMembers), not a PostgREST embed. Read-only; returns [] on any
+ * non-ok so the caller can render its fetch-failure state.
+ */
+export async function listRosterCandidates(sourceGroupId: string): Promise<PlayerLite[]> {
+  const gid = sourceGroupId.trim();
+  if (!gid) return [];
+  const { base, anonKey } = restCtx();
+  const token = await getStoredAccessToken();
+  if (!base || !token) return [];
+  const headers = { Authorization: `Bearer ${token}`, apikey: anonKey || token };
+  const memRes = await fetch(
+    `${base}/rest/v1/group_members?group_id=eq.${encodeURIComponent(gid)}&select=player_id`,
+    { headers },
+  );
+  if (!memRes.ok) return [];
+  const mem = (await memRes.json()) as { player_id: string }[];
+  if (!Array.isArray(mem) || mem.length === 0) return [];
+  const ids = [...new Set(mem.map((m) => m.player_id))];
+  const inList = ids.map((id) => `"${id}"`).join(',');
+  const res = await fetch(
+    `${base}/rest/v1/players?id=in.(${inList})&select=id,display_name,full_name,email,user_id,retired_at&order=display_name.asc`,
+    { headers },
+  );
+  if (!res.ok) return [];
+  return (await res.json()) as PlayerLite[];
+}
+
 /** Exact-email lookup — used to catch a duplicate BEFORE any write. */
 export async function findPlayerByEmail(email: string): Promise<PlayerLite | null> {
   const e = email.trim().toLowerCase();

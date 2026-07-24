@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ApiError } from '@/lib/api';
+import { useGroup } from '@/contexts/GroupContext';
 import {
   addPlayerToGroup,
   buildSignInInstructions,
@@ -21,6 +22,7 @@ import {
   deriveInviteStatus,
   findPlayerByEmail,
   getPlayersAuthStatus,
+  listRosterCandidates,
   reactivateMembership,
   searchPlayers,
   sendInvite,
@@ -74,11 +76,18 @@ export function AddInvitePlayerSheet({
   onChanged,
 }: Props) {
   const insets = useSafeAreaInsets();
-  const [mode, setMode] = useState<'search' | 'new'>('search');
+  const { groups } = useGroup();
+  const [mode, setMode] = useState<'search' | 'new' | 'browse'>('search');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlayerLite[]>([]);
   const [searching, setSearching] = useState(false);
   const [authStatus, setAuthStatus] = useState<Map<string, PlayerAuthStatus>>(new Map());
+
+  // Browse-a-roster mode: pick another group, list its members as prospects.
+  const [sourceGroupId, setSourceGroupId] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<PlayerLite[]>([]);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -113,8 +122,35 @@ export function AddInvitePlayerSheet({
     setNotice(null);
     setError(null);
     setPending(null);
+    setSourceGroupId(null);
+    setCandidates([]);
+    setRosterLoading(false);
+    setRosterError(false);
     getPlayersAuthStatus().then(setAuthStatus).catch(() => setAuthStatus(new Map()));
   }, [visible]);
+
+  // Load a source roster when one is picked. Filtering against the current
+  // group happens at render time (against the live membershipByPlayerId), so a
+  // player added mid-browse drops off on the next parent refresh without
+  // touching this raw list.
+  useEffect(() => {
+    if (!visible || mode !== 'browse' || !sourceGroupId) return;
+    let cancelled = false;
+    setRosterLoading(true);
+    setRosterError(false);
+    setCandidates([]);
+    listRosterCandidates(sourceGroupId)
+      .then((rows) => { if (!cancelled) setCandidates(rows); })
+      .catch(() => { if (!cancelled) setRosterError(true); })
+      .finally(() => { if (!cancelled) setRosterLoading(false); });
+    return () => { cancelled = true; };
+  }, [visible, mode, sourceGroupId]);
+
+  const sourceGroups = groups.filter((g) => g.id !== groupId);
+  const sourceGroupName = sourceGroups.find((g) => g.id === sourceGroupId)?.name ?? 'this roster';
+  // Prospects = source-roster members not already in the current group (active
+  // or inactive). Filtered live against membershipByPlayerId so adds self-prune.
+  const rosterProspects = candidates.filter((p) => !membershipByPlayerId?.has(p.id));
 
   // Debounced search.
   useEffect(() => {
@@ -393,7 +429,9 @@ export function AddInvitePlayerSheet({
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 16 }]}>
           <View style={styles.header}>
-            <Text style={styles.title}>{mode === 'search' ? 'Add / Invite Player' : 'New Player'}</Text>
+            <Text style={styles.title}>
+              {mode === 'search' ? 'Add / Invite Player' : mode === 'browse' ? 'Browse a Roster' : 'New Player'}
+            </Text>
             <Pressable onPress={onClose} hitSlop={8}><Text style={styles.close}>{'✕'}</Text></Pressable>
           </View>
           {groupName ? <Text style={styles.groupHint}>into {decodeURIComponent(groupName)}</Text> : null}
@@ -414,6 +452,12 @@ export function AddInvitePlayerSheet({
                 autoCapitalize="none"
                 autoFocus
               />
+              <Pressable
+                style={styles.browseLink}
+                onPress={() => { setError(null); setNotice(null); setMode('browse'); }}
+              >
+                <Text style={styles.browseLinkText}>Browse a roster {'›'}</Text>
+              </Pressable>
               <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
                 {searching ? (
                   <ActivityIndicator style={{ marginTop: 16 }} color={OLIVE} />
@@ -441,6 +485,62 @@ export function AddInvitePlayerSheet({
                   <Text style={styles.hint}>Type at least 2 characters to search.</Text>
                 )}
               </ScrollView>
+            </>
+          ) : mode === 'browse' ? (
+            <>
+              {sourceGroupId === null ? (
+                <>
+                  <Text style={styles.fieldLabel}>Pick a roster to browse for players to add to {groupLabel}.</Text>
+                  <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
+                    {sourceGroups.length === 0 ? (
+                      <Text style={styles.hint}>No other groups to browse.</Text>
+                    ) : (
+                      sourceGroups.map((g) => (
+                        <Pressable
+                          key={g.id}
+                          style={styles.rosterRow}
+                          onPress={() => { setError(null); setNotice(null); setSourceGroupId(g.id); }}
+                        >
+                          <Text style={styles.rosterRowText}>{g.name}</Text>
+                          <Text style={styles.rosterRowChevron}>{'›'}</Text>
+                        </Pressable>
+                      ))
+                    )}
+                  </ScrollView>
+                </>
+              ) : (
+                <>
+                  <Pressable
+                    style={styles.rosterHeaderRow}
+                    onPress={() => { setSourceGroupId(null); setCandidates([]); setRosterError(false); }}
+                  >
+                    <Text style={styles.rosterHeaderText}>{sourceGroupName}</Text>
+                    <Text style={styles.rosterHeaderChange}>Change</Text>
+                  </Pressable>
+                  <ScrollView style={styles.results} keyboardShouldPersistTaps="handled">
+                    {rosterLoading ? (
+                      <ActivityIndicator style={{ marginTop: 16 }} color={OLIVE} />
+                    ) : rosterError ? (
+                      <View style={styles.errorBox}>
+                        <Text style={styles.errorText}>Couldn’t load {sourceGroupName} — try again.</Text>
+                      </View>
+                    ) : candidates.length === 0 ? (
+                      <View style={styles.noticeBox}>
+                        <Text style={styles.noticeText}>{sourceGroupName} has no players yet.</Text>
+                      </View>
+                    ) : rosterProspects.length === 0 ? (
+                      <View style={styles.noticeBox}>
+                        <Text style={styles.noticeText}>Everyone in {sourceGroupName} is already in {groupLabel}.</Text>
+                      </View>
+                    ) : (
+                      rosterProspects.map(renderMatch)
+                    )}
+                  </ScrollView>
+                </>
+              )}
+              <Pressable style={styles.backLink} onPress={() => { setMode('search'); setError(null); setNotice(null); }}>
+                <Text style={styles.backLinkText}>{'‹'} Back to search</Text>
+              </Pressable>
             </>
           ) : (
             <ScrollView keyboardShouldPersistTaps="handled">
@@ -482,6 +582,14 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#DDD', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: '#1A1A1A', backgroundColor: '#FAFAFA', marginTop: 4, marginBottom: 4 },
   results: { marginTop: 8 },
   hint: { color: '#8E8E93', fontSize: 13, marginTop: 12, textAlign: 'center' },
+  browseLink: { alignSelf: 'flex-start', paddingVertical: 6 },
+  browseLinkText: { color: OLIVE, fontSize: 14, fontWeight: '600' },
+  rosterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 8 },
+  rosterRowText: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
+  rosterRowChevron: { fontSize: 22, color: '#8E8E93' },
+  rosterHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 4 },
+  rosterHeaderText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', flex: 1 },
+  rosterHeaderChange: { fontSize: 14, fontWeight: '600', color: OLIVE, paddingLeft: 12 },
   noMatch: { alignItems: 'center', marginTop: 16, gap: 12 },
   noMatchText: { color: '#666', fontSize: 14 },
   matchCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, padding: 12, marginBottom: 8, gap: 8 },
