@@ -52,7 +52,7 @@ serve(async (req) => {
 
   const { data, error } = await supabase
     .from("groups")
-    .select("id, name, section_id, logo_url, dollars_per_point")
+    .select("id, name, section_id, logo_url, dollars_per_point, group_type")
     .order("name");
 
   if (error) {
@@ -62,12 +62,16 @@ serve(async (req) => {
     );
   }
 
-  const groups = (data ?? []).map((row: { id: string; name: string; section_id: string | null; logo_url: string | null; dollars_per_point: number | null }) => ({
+  const groups = (data ?? []).map((row: { id: string; name: string; section_id: string | null; logo_url: string | null; dollars_per_point: number | null; group_type: string | null }) => ({
     id: row.id,
     name: row.name,
     section_id: row.section_id ?? null,
     logo_url: row.logo_url ?? null,
     dollars_per_point: row.dollars_per_point ?? null,
+    // 'league' (plays; player-visible) vs 'roster' (prospect pool; hidden from
+    // players, browsable by super-admins). Defaults to 'league' defensively so a
+    // pre-052 row or a null never reads as a roster (migration 052).
+    group_type: row.group_type ?? "league",
   }));
 
   return new Response(JSON.stringify({ groups }), {
