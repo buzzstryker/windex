@@ -11,7 +11,11 @@
  *
  * The component (components/HistoryChart.tsx) owns fetching, state, and rendering,
  * and calls into here for every coordinate it emits.
+ *
+ * Its one import, ./seasonLabel, is held to the same rule.
  */
+
+import { seasonLabel } from './seasonLabel';
 
 /* ── Plot geometry ──────────────────────────────────────────────────────────
  * Exported rather than duplicated in the component so the verification path and
@@ -246,7 +250,7 @@ export function activeLinesOf(data: ChartData | null): PlayerLine[] {
 
 /* ── Ranges ────────────────────────────────────────────────────────────────── */
 
-export type RangeKey = 'season' | 'd10' | 'd4';
+export type RangeKey = 'season' | 'd10' | 'd4' | 'career';
 export const RANGE_DAYS = { d10: 10, d4: 4 } as const;
 export type WindowKey = keyof typeof RANGE_DAYS;
 
@@ -460,8 +464,8 @@ export function niceTickValues(min: number, max: number, count: number): number[
 }
 
 /** An x-axis tick. `anchor` defaults to 'middle'; an empty label draws the
- *  gridline only. */
-export type MonthTick = { nx: number; label: string; anchor?: 'middle' | 'end' };
+ *  gridline only, and `grid: false` draws the label only. */
+export type MonthTick = { nx: number; label: string; anchor?: 'middle' | 'end'; grid?: boolean };
 
 /**
  * First-of-month ticks placed through toX — the SAME mapping the vertices use.
@@ -536,6 +540,9 @@ export type TooltipRow = {
   lastDate?: string;
   /** Pixel y of the crosshair dot, or null for an ended row (no dot drawn). */
   svgY: number | null;
+  /** All time only: the label of this player's first season, set when the snapped
+   *  season comes before it. No career yet — renders muted as "joined 2026", no dot. */
+  joined?: string;
 };
 
 export const MAX_TOOLTIP_ROWS = 5;
@@ -611,4 +618,299 @@ export function buildTooltipRows(
     .sort((a, b) => (a.svgY ?? 0) - (b.svgY ?? 0) || b.value - a.value);
   const ended = rows.filter((r) => r.ended).sort((a, b) => b.value - a.value);
   return [...positioned, ...ended];
+}
+
+/* ── All time ──────────────────────────────────────────────────────────────── */
+
+/** Structural subset of Season (lib/api), declared locally for the same reason as
+ *  StandingLike. */
+export type SeasonLike = { id: string; start_date: string; end_date: string; name?: string | null };
+
+/** The season_standings columns All time reads: one row per (season, player). */
+export type CareerRow = { season_id: string; player_id: string; rounds_played: number; total_points: number };
+
+export type CareerSpan = {
+  id: string;
+  /** seasonLabel(): the name the season picker shows. */
+  label: string;
+  start: string;
+  end: string;
+  /** The season in progress. Its vertex is today's standing, not a final one. */
+  toDate: boolean;
+  /** Where this season's vertex sits, and the snap date that selects it: the season's
+   *  last day, or today for the season in progress. */
+  vertexDate: string;
+};
+
+/** All time is offered only when the plotted players have PLAYED in at least this
+ *  many seasons. One season of career is the Season chart with less detail. */
+export const MIN_CAREER_SEASONS = 2;
+
+/**
+ * The seasons All time plots, in START_DATE order.
+ *
+ * Ordered by start_date, never by id. Season ids are opaque, and a career summed in
+ * id order is a plausible chart that is wrong everywhere — nothing about it looks
+ * broken. V-order checks this on a fixture whose ids do not sort in date order.
+ *
+ * Seasons that have not started are dropped. The rollover job creates next season
+ * months early and season_standings lists every active member in it at 0 (migration
+ * 039), so a future season would otherwise add a flat vertex a year past today.
+ *
+ * `todayIso` is the chart's LOCAL date, the one every other range anchors to.
+ * listSeasons (lib/api) filters future seasons by the UTC date instead, so for a few
+ * hours around midnight on a season's first day the picker and the All Time
+ * leaderboard can disagree with this about whether that season has started. Known and
+ * accepted: the chart is consistent with itself, and the gap is listSeasons'.
+ */
+export function careerSpans(seasons: SeasonLike[], todayIso: string): CareerSpan[] {
+  return seasons
+    .filter((s) => s.start_date <= todayIso)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+    .map((s) => {
+      const toDate = s.end_date >= todayIso;
+      return {
+        id: s.id,
+        label: seasonLabel(s),
+        start: s.start_date,
+        end: s.end_date,
+        toDate,
+        vertexDate: toDate ? todayIso : s.end_date,
+      };
+    });
+}
+
+/**
+ * All time's one date -> x mapping: x=0 is the first season's first day and x=1 the
+ * LAST season's last day — not today, unlike every other range. Every season keeps
+ * its full calendar width from its first day, so a season just begun still has a
+ * whole slot for its label instead of a sliver against the previous one, and the part
+ * still to play reads as open plot to the right of today's vertex.
+ */
+export function careerToX(spans: CareerSpan[]): (date: string) => number {
+  if (spans.length === 0) return () => 0;
+  return makeToX(spans[0].start, spans[spans.length - 1].end);
+}
+
+/**
+ * Whether All time is offered: the season on screen is the one in progress, and the
+ * plotted players have played in at least MIN_CAREER_SEASONS started seasons.
+ *
+ * Played means rounds_played > 0. A season in progress lists every active member at 0
+ * rounds, and so does a future one, so counting rows would count seasons nobody played.
+ */
+export function careerEnabled(spans: CareerSpan[], rows: CareerRow[], playerIds: string[], seasonId: string): boolean {
+  const current = spans.find((s) => s.toDate);
+  if (!current || current.id !== seasonId) return false;
+  const plotted = new Set(playerIds);
+  const started = new Set(spans.map((s) => s.id));
+  const played = new Set(
+    rows.filter((r) => plotted.has(r.player_id) && started.has(r.season_id) && r.rounds_played > 0).map((r) => r.season_id),
+  );
+  return played.size >= MIN_CAREER_SEASONS;
+}
+
+export type CareerData = ChartData & {
+  /** The plotted seasons, in order. dates[i] is spans[i].vertexDate. */
+  spans: CareerSpan[];
+  /** Line id -> index into spans of that player's first season. */
+  firstSpan: Map<string, number>;
+};
+
+/**
+ * Running career total per player: one vertex per season, on its last day (today for
+ * the season in progress), carrying the sum of that player's season_standings totals
+ * through it.
+ *
+ *   start    0 on the first day of the player's first season. A line begins where the
+ *            career does: a 2026 joiner has no line across 2020-2025, which would
+ *            otherwise claim they broke even for five years. If that day is today, the
+ *            start shares x with the vertex and is dropped, or valueAt would read the 0.
+ *   vertex   every season from the first on, INCLUDING one sat out, carrying the total
+ *            flat. Skipping it would draw a diagonal across the missed season.
+ *
+ * First season = the first they PLAYED (rounds_played > 0); for someone listed in the
+ * season in progress who has not played at all yet, that season.
+ *
+ * Units are the league's own: a point is a dollar settled and every round is zero-sum
+ * in it, so summing seasons is coherent. Half points are left as they are.
+ *
+ * `players` is the Season chart's pill set, so All time plots the same players in the
+ * same order and a selection means the same thing in every range. Rows for anyone
+ * else, and for seasons not in `spans`, are ignored.
+ *
+ * thin is always false. Nearest-5 excludes thin season lines because a value
+ * interpolated off a 2-vertex diagonal is invented; All time only reports a value at a
+ * season's vertex, which is exact.
+ *
+ * y-domain as buildChartData: over every line, padded, blind to selection.
+ */
+export function buildCareerData(rows: CareerRow[], spans: CareerSpan[], players: StandingLike[]): CareerData {
+  const index = new Map(spans.map((s, i) => [s.id, i]));
+  const byPlayer = new Map<string, Map<number, CareerRow>>();
+  for (const r of rows) {
+    const i = index.get(r.season_id);
+    if (i === undefined) continue;
+    const mine = byPlayer.get(r.player_id) ?? new Map<number, CareerRow>();
+    mine.set(i, r);
+    byPlayer.set(r.player_id, mine);
+  }
+
+  const toX = careerToX(spans);
+  const firstSpan = new Map<string, number>();
+  let lo = 0;
+  let hi = 0;
+
+  const lines = players.map((p): PlayerLine => {
+    const name = p.player_name ?? p.player_id.slice(0, 8);
+    const mine = byPlayer.get(p.player_id);
+    let first = spans.findIndex((_, i) => (mine?.get(i)?.rounds_played ?? 0) > 0);
+    const last = spans.length - 1;
+    if (first < 0 && last >= 0 && spans[last].toDate && mine?.has(last)) first = last;
+    if (!mine || first < 0) return { id: p.player_id, name, points: [], thin: false, playedDates: [] };
+
+    firstSpan.set(p.player_id, first);
+    const points: LinePoint[] = [{ x: toX(spans[first].start), y: 0, date: spans[first].start }];
+    const playedDates: string[] = [];
+    let total = 0;
+    for (let i = first; i < spans.length; i++) {
+      const row = mine.get(i);
+      if (row && row.rounds_played > 0) playedDates.push(spans[i].vertexDate);
+      total += row?.total_points ?? 0;
+      points.push({ x: toX(spans[i].vertexDate), y: total, date: spans[i].vertexDate });
+      if (total < lo) lo = total;
+      if (total > hi) hi = total;
+    }
+    if (points[1].x === points[0].x) points.shift();
+    return { id: p.player_id, name, points, thin: false, playedDates };
+  });
+
+  lo = Math.floor(lo);
+  hi = Math.ceil(hi);
+  const pad = Math.max(10, Math.round((hi - lo) * 0.1));
+  return { lines, yMin: lo - pad, yMax: hi + pad, dates: spans.map((s) => s.vertexDate), spans, firstSpan };
+}
+
+/**
+ * All time's x-axis: a gridline on each finished season's last day, exactly where its
+ * vertex sits, and each season's label centred in its own slot, under the segment its
+ * points drew. Labels carry grid: false so they add no gridline of their own.
+ *
+ * A slot is ~40px of a 307px plot at seven seasons and ~25px at twelve, against ~26px
+ * for a four-digit year. Past about a dozen seasons the labels will need thinning.
+ */
+export function buildCareerTicks(spans: CareerSpan[], toX: (d: string) => number): MonthTick[] {
+  const ticks: MonthTick[] = [];
+  spans.forEach((s, i) => {
+    const from = i === 0 ? toX(s.start) : toX(spans[i - 1].end);
+    ticks.push({ nx: (from + toX(s.end)) / 2, label: s.label, grid: false });
+    if (!s.toDate && i < spans.length - 1) ticks.push({ nx: toX(s.vertexDate), label: '' });
+  });
+  return ticks;
+}
+
+/** Tooltip header at a snap date: "2020 season", or "2026 season to date". */
+export function careerHeaderAt(data: CareerData, date: string): string {
+  const span = data.spans[data.dates.indexOf(date)];
+  if (!span) return '';
+  return span.toDate ? `${span.label} season to date` : `${span.label} season`;
+}
+
+/**
+ * Tooltip rows for All time at a snap date: buildTooltipRows over the players whose
+ * career had begun by that season, plus a "joined" row for each SELECTED player whose
+ * had not.
+ *
+ * valueAt reports a line's first value for any x before it, and a career line starts
+ * at 0 — so plain buildTooltipRows would show a 2026 joiner at 0, with a dot, in 2020:
+ * broke even, in a league they were not in. They never enter the nearest-5; selected,
+ * they get a row reading "joined 2026", no dot, after the positioned rows, earliest
+ * joiner first. Joined-ness is read from the season index, not from x.
+ */
+export function buildCareerTooltipRows(
+  data: CareerData,
+  date: string,
+  selectedIds: string[],
+  cursorSvgY: number,
+  s: Scales,
+): TooltipRow[] {
+  const k = data.dates.indexOf(date);
+  if (k < 0) return [];
+  const nx = careerToX(data.spans)(date);
+  const firstOf = (id: string) => data.firstSpan.get(id) ?? Infinity;
+  const lines = activeLinesOf(data);
+  const rows = buildTooltipRows(lines.filter((l) => firstOf(l.id) <= k), nx, selectedIds, cursorSvgY, s);
+  const pending = lines
+    .filter((l) => selectedIds.includes(l.id) && firstOf(l.id) > k)
+    .sort((a, b) => firstOf(a.id) - firstOf(b.id))
+    .map((l): TooltipRow => ({
+      id: l.id,
+      name: l.name,
+      value: 0,
+      ended: false,
+      svgY: null,
+      joined: data.spans[firstOf(l.id)].label,
+    }));
+  return [...rows, ...pending];
+}
+
+/* ── What the chart shows ──────────────────────────────────────────────────── */
+
+export const RANGE_LABELS: Record<RangeKey, string> = { season: 'Season', d10: '10 days', d4: '4 days', career: 'All time' };
+const RANGE_ORDER: RangeKey[] = ['season', 'd10', 'd4', 'career'];
+
+export type HistoryModel = {
+  /** All time's data whenever its rows loaded, on offer or not; else null. */
+  career: CareerData | null;
+  /** The range toggle, in order. A range with nothing to show is disabled before the tap. */
+  options: { key: RangeKey; label: string; disabled: boolean }[];
+  /** The range to draw: the one asked for if it is on offer, else Season, else All time.
+   *  Null when nothing is on offer — the chart says so instead of drawing. */
+  range: RangeKey | null;
+  /** The pills, in standings order: every player with a line in a range on offer. One
+   *  set whatever the range, so a selection survives switching. */
+  pills: { id: string; name: string }[];
+};
+
+/**
+ * Everything HistoryChart decides before it draws: which ranges are on offer, which to
+ * draw, the pills, and whether there is anything to show at all. The component renders
+ * from this and nothing else, so verify.js reaches its decisions headless (V-reach).
+ *
+ * Season, 10 days and 4 days need a Season line. All time does not. In the first days
+ * of a season nobody has a Season line yet, and career is the only thing worth looking
+ * at — gating the chart on Season lines hid All time exactly then.
+ *
+ * All time plots the CURRENT STANDINGS players, which in a season just begun is every
+ * active member, and its enable rule counts their played seasons.
+ */
+export function historyModel(input: {
+  season: ChartData;
+  careerRows: CareerRow[] | null;
+  spans: CareerSpan[];
+  standings: StandingLike[];
+  seasonId: string;
+  todayIso: string;
+  requested: RangeKey;
+}): HistoryModel {
+  const { season, careerRows, spans, standings, seasonId, todayIso, requested } = input;
+  const seasonLines = activeLinesOf(season);
+  const hasSeason = seasonLines.length > 0;
+  const career = careerRows ? buildCareerData(careerRows, spans, standings) : null;
+  const on: Record<RangeKey, boolean> = {
+    season: hasSeason,
+    d10: hasSeason && rangeHasRounds(season.dates, windowStartOf(todayIso, RANGE_DAYS.d10), todayIso),
+    d4: hasSeason && rangeHasRounds(season.dates, windowStartOf(todayIso, RANGE_DAYS.d4), todayIso),
+    career: !!careerRows && careerEnabled(spans, careerRows, standings.map((p) => p.player_id), seasonId),
+  };
+  const drawn = new Set(seasonLines.map((l) => l.id));
+  if (on.career && career) for (const l of activeLinesOf(career)) drawn.add(l.id);
+  return {
+    career,
+    options: RANGE_ORDER.map((key) => ({ key, label: RANGE_LABELS[key], disabled: !on[key] })),
+    range: on[requested] ? requested : on.season ? 'season' : on.career ? 'career' : null,
+    pills: standings
+      .filter((p) => drawn.has(p.player_id))
+      .map((p) => ({ id: p.player_id, name: p.player_name ?? p.player_id.slice(0, 8) })),
+  };
 }

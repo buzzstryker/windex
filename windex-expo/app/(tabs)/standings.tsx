@@ -391,6 +391,7 @@ export default function StandingsScreen() {
               standings={standings}
               seasonStartDate={selectedSeason.start_date}
               seasonEndDate={selectedSeason.end_date}
+              seasons={seasons}
             />
           ) : null}
         </ScrollView>

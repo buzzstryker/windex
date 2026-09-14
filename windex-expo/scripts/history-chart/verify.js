@@ -5,6 +5,7 @@
  *
  *   Season   V1 V2 V3 V5 V7 V9 Hues
  *   Ranges   V1w V2w V3w V7w V9w V13 V-pills V-clamp
+ *   All time V-order V1c V2c V3c V7c V9c V13c V-pills-c V-reach
  *   Pins     V12  Season output byte-identical to the pre-ranges commit
  *            V14  Standings toggle styles identical to the pre-extraction commit
  *
@@ -30,6 +31,18 @@
  * before it entered this public repo: player ids and names are replaced, scores,
  * dates and season starts are untouched. Replacement ids preserve the sorted order
  * of the originals, so assignHues (which sorts player_id) behaves identically.
+ *
+ * fixture.alltime is the same two leagues on the same date, under the same placeholder
+ * ids. Per league: every season that existed on 2026-08-11 — including the future one
+ * the rollover job had already created, which careerSpans must drop — and the
+ * season_standings rows for those seasons, the view body evaluated as of that date.
+ * Season ids are synthetic and deliberately NOT in date order. allTimeLeaderboard is
+ * the All Time leaderboard as standings.tsx computes it (per-season standings merged
+ * over the seasons listSeasons returns). rawScoreTotals is the independent side:
+ * league_scores summed per player, with no view and no membership join. The two agreed
+ * 12/12 in both leagues when taken, and V13c holds them, and every career line, to it.
+ * Totals are untouched, 2021 and 2022 half points included. YC Windex has one season
+ * with totals, so it is the league the >= 2 seasons rule disables.
  */
 const fs = require('fs');
 const path = require('path');
@@ -1247,6 +1260,588 @@ function vHues(key) {
   }
 }
 
+/* ── All time ─────────────────────────────────────────────────────────────────
+ * Fixture: fixture.alltime (see the header). Every case is built the way the
+ * component builds it: the players are the current standings, and the season on screen
+ * is found by start date, not through careerSpans.
+ */
+function careerCase(key, seasonId, today = TODAY) {
+  const f = fixture[key];
+  const a = fixture.alltime[key];
+  const season = M.buildChartData(f.scores, f.standings, f.seasonStart, TODAY);
+  const players = f.standings;
+  const spans = M.careerSpans(a.seasons, today);
+  const onScreen = seasonId ?? a.seasons.find((s) => s.start_date === f.seasonStart).id;
+  return {
+    key,
+    f,
+    a,
+    seasonId: onScreen,
+    season,
+    players,
+    spans,
+    enabled: M.careerEnabled(spans, a.rows, players.map((p) => p.player_id), onScreen),
+    data: M.buildCareerData(a.rows, spans, players),
+    toX: M.careerToX(spans),
+  };
+}
+
+const seasonsOf = (...ranges) => ranges.map(([id, start_date, end_date]) => ({ id, start_date, end_date }));
+const crow = (season_id, player_id, total_points, rounds_played = 1) => ({ season_id, player_id, rounds_played, total_points });
+
+/* ── V-order ── Seasons in start_date order, never id order ─────────────────── */
+function vOrder() {
+  for (const key of FIXTURES) {
+    const a = fixture.alltime[key];
+    const spans = M.careerSpans(a.seasons, TODAY);
+    const ids = spans.map((s) => s.id).join();
+    const starts = spans.map((s) => s.start);
+    const ascending = starts.every((d, i) => i === 0 || starts[i - 1] < d);
+    const fromReversed = M.careerSpans([...a.seasons].reverse(), TODAY).map((s) => s.id).join();
+    if (spans.length > 0 && ascending && fromReversed === ids) {
+      ok(`V-order ${key}`, `${spans.length} season(s) in start_date order (${starts.join(', ')}); reversed input gives the same`);
+    } else {
+      bad(`V-order ${key}`, `order ${ids}, starts ${starts.join(', ')}, from reversed input ${fromReversed}`);
+    }
+  }
+
+  // Falsifier. The fixture's season ids do not sort in date order, so id order is a
+  // different sequence, and a career built in it is a plausible chart that is wrong.
+  // If either failed to differ, V-order could not catch the mistake it exists for.
+  const c = careerCase('windexcup');
+  const byId = [...c.spans].sort((x, y) => x.id.localeCompare(y.id));
+  const ys = (data) => data.lines.map((l) => l.points.map((p) => p.y).join('/'));
+  const right = ys(c.data);
+  const wrong = ys(M.buildCareerData(c.a.rows, byId, c.players));
+  const changed = right.filter((seq, i) => seq !== wrong[i]).length;
+  const idSeq = byId.map((s) => s.id).join(' ');
+  const startSeq = c.spans.map((s) => s.id).join(' ');
+  if (idSeq !== startSeq && changed > 0) {
+    ok('V-order falsifier', `id order ${idSeq} vs start order ${startSeq}; built in id order, ${changed} of ${right.length} career lines change`);
+  } else {
+    bad('V-order falsifier', `id order ${idSeq}, start order ${startSeq}, ${changed} lines change — cannot tell the two apart`);
+  }
+}
+
+/* ── V1c ── Career interpolation matches the rendered pixel, every column ───── */
+function v1c() {
+  const c = careerCase('windexcup');
+  const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
+  let compared = 0;
+  let worst = 0;
+  let carryDis = 0;
+  let vertexWorst = 0;
+  let vertices = 0;
+  for (const line of M.activeLinesOf(c.data)) {
+    const str = M.polylinePoints(line, s);
+    for (let px = 0; px <= s.plotW; px++) {
+      const nx = px / s.plotW;
+      const v = M.valueAt(line.points, nx);
+      const B = pixelSpaceLookup(str, s.toSvgX(nx));
+      // Right of today's vertex is the season still to play: no line, on both paths.
+      if (v === null || B === null) {
+        if ((v === null) !== (B === null)) worst = Infinity;
+        continue;
+      }
+      worst = Math.max(worst, Math.abs(s.plotY(v) - B));
+      compared++;
+      const cf = carryForward(line.points, nx);
+      if (cf !== null && Math.abs(s.plotY(cf) - B) > 0.5) carryDis++;
+    }
+    // At a snap date the tooltip reads the season's vertex itself, exactly.
+    for (const d of c.data.dates) {
+      const p = line.points.find((q) => q.date === d);
+      if (!p) continue;
+      vertexWorst = Math.max(vertexWorst, Math.abs(M.valueAt(line.points, c.toX(d)) - p.y));
+      vertices++;
+    }
+  }
+  if (compared > 0 && worst < 0.5 && vertices > 0 && vertexWorst < 1e-9) {
+    ok('V1c windexcup', `${compared} column comparisons, worst |A-B| = ${worst.toFixed(6)}px; ${vertices} vertices read back exactly at their snap dates`);
+  } else {
+    bad('V1c windexcup', `worst |A-B| = ${worst}px over ${compared}; worst vertex error ${vertexWorst} over ${vertices}`);
+  }
+  if (carryDis > 0) ok('V1c falsifier', `carry-forward disagrees at ${carryDis} columns (test discriminates)`);
+  else bad('V1c falsifier', 'carry-forward agreed at every column — V1c does not discriminate');
+}
+
+/* ── V2c ── Selection never moves the career axis; the range does ───────────── */
+function v2c() {
+  const c = careerCase('windexcup');
+  const ids = M.activeLinesOf(c.season).map((l) => l.id);
+  const selections = [[], [ids[0]], [ids[1]], [ids[ids.length - 1]], ids.slice(0, 2), ids.slice(0, M.MAX_SELECTED)];
+  const domains = selections.map((sel) => {
+    void M.assignHues(ids, sel);
+    const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
+    return [c.data.yMin, c.data.yMax, s.toSvgY(0), s.plotY(100)].join('|');
+  });
+  if (domains.every((d) => d === domains[0])) ok('V2c selection', `domain [${c.data.yMin}, ${c.data.yMax}] identical across ${selections.length} selection states`);
+  else bad('V2c selection', `domain moved with selection: ${JSON.stringify(domains)}`);
+
+  if (M.buildCareerData.length === 3) ok('V2c signature', 'buildCareerData takes no selection argument');
+  else bad('V2c signature', `buildCareerData arity ${M.buildCareerData.length}, expected 3`);
+
+  // Every career line sits inside the domain: All time covers every line and never clamps.
+  const outside = M.activeLinesOf(c.data).filter((l) => l.points.some((p) => p.y < c.data.yMin || p.y > c.data.yMax)).length;
+  const moved = c.data.yMin !== c.season.yMin || c.data.yMax !== c.season.yMax;
+  if (outside === 0 && moved) ok('V2c range', `axis moved: Season [${c.season.yMin}, ${c.season.yMax}] -> All time [${c.data.yMin}, ${c.data.yMax}]; no line outside it`);
+  else bad('V2c range', `moved=${moved}, ${outside} lines outside the domain`);
+}
+
+/* ── V3c ── Season gridlines under the vertices, labels centred per slot ────── */
+function v3c() {
+  const c = careerCase('windexcup');
+  const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
+  const ticks = M.buildCareerTicks(c.spans, c.toX);
+  const grid = ticks.filter((t) => t.grid !== false);
+  const labels = ticks.filter((t) => t.grid === false);
+  const finished = c.spans.filter((sp) => !sp.toDate);
+  const problems = [];
+
+  if (grid.length !== finished.length) problems.push(`${grid.length} gridlines for ${finished.length} finished seasons`);
+  let onVertex = 0;
+  finished.forEach((sp, i) => {
+    const vx = c.toX(sp.vertexDate);
+    if (!grid[i] || grid[i].nx !== vx || grid[i].label !== '') problems.push(`gridline ${i} at ${grid[i] && grid[i].nx}, vertex at ${vx}`);
+    for (const l of M.activeLinesOf(c.data)) {
+      const p = l.points.find((q) => q.date === sp.vertexDate);
+      if (!p) continue;
+      if (p.x !== vx) problems.push(`${l.id} vertex ${sp.vertexDate} at ${p.x}, gridline ${vx}`);
+      else onVertex++;
+    }
+  });
+
+  if (labels.length !== c.spans.length) problems.push(`${labels.length} labels for ${c.spans.length} seasons`);
+  c.spans.forEach((sp, i) => {
+    const from = i === 0 ? 0 : c.toX(c.spans[i - 1].end);
+    const mid = new Date((M.dayMs(sp.start) + M.dayMs(sp.end)) / 2).getFullYear();
+    const t = labels[i];
+    if (!t || t.nx !== (from + c.toX(sp.end)) / 2 || t.label !== String(mid)) problems.push(`label ${i} ${JSON.stringify(t)}, want ${mid} at slot centre`);
+  });
+  if (c.toX(c.spans[c.spans.length - 1].end) !== 1) problems.push('the last season does not end the axis');
+  let minGap = Infinity;
+  for (let i = 1; i < labels.length; i++) minGap = Math.min(minGap, s.plotW * (labels[i].nx - labels[i - 1].nx));
+  if (minGap < 30) problems.push(`labels ${minGap.toFixed(1)}px apart`);
+
+  if (problems.length === 0) ok('V3c windexcup', `${grid.length} gridlines each under ${onVertex} vertices exactly; ${labels.length} labels centred per slot (${labels.map((t) => t.label).join(' ')}), >= ${minGap.toFixed(0)}px apart`);
+  else bad('V3c windexcup', problems.slice(0, 4).join('; '));
+
+  // Regression arm: seasons are not equal widths (2020 and 2024 hold a Feb 29), so an
+  // even i/n spacing must drift — otherwise this could not catch a second mapping.
+  const drift = Math.max(...finished.map((sp, i) => Math.abs(c.toX(sp.vertexDate) - (i + 1) / c.spans.length)));
+  if (drift > 1e-4) ok('V3c regression', `even i/n spacing would drift ${drift.toFixed(5)} nx`);
+  else bad('V3c regression', `even spacing drift only ${drift} — test would not catch a second mapping`);
+}
+
+/* ── V7c ── Degenerate and boundary states ─────────────────────────────────── */
+function v7c() {
+  // a. A season that has not started never produces a vertex.
+  for (const key of FIXTURES) {
+    const c = careerCase(key);
+    const future = c.a.seasons.filter((sp) => sp.start_date > TODAY);
+    const futureRows = c.a.rows.filter((r) => future.some((sp) => sp.id === r.season_id)).length;
+    const leaked =
+      c.spans.filter((sp) => sp.start > TODAY).length +
+      c.data.dates.filter((d) => d > TODAY).length +
+      c.data.lines.reduce((n, l) => n + l.points.filter((p) => p.date > TODAY).length, 0);
+    // Arm: the same build with the future season kept, as a season just begun.
+    const kept = [...c.spans, ...M.careerSpans(future, future.length ? future[0].start_date : TODAY)];
+    const armLeaks = M.buildCareerData(c.a.rows, kept, c.players).lines.reduce((n, l) => n + l.points.filter((p) => p.date > TODAY).length, 0);
+    const name = `V7c-a ${key}`;
+    if (future.length > 0 && futureRows > 0 && leaked === 0 && armLeaks > 0) {
+      ok(name, `${future.length} unstarted season with ${futureRows} rows dropped, 0 vertices past ${TODAY}; kept, it would add ${armLeaks}`);
+    } else {
+      bad(name, `unstarted seasons ${future.length}, rows ${futureRows}, leaked ${leaked}, arm ${armLeaks} (want >0, >0, 0, >0)`);
+    }
+  }
+
+  // a2. "Started" is decided on the chart's own date, at the day boundary.
+  {
+    const yesterday = M.windowStartOf(TODAY, 1);
+    const tomorrow = M.windowStartOf(TODAY, -1);
+    const today = M.careerSpans(seasonsOf(['old', '2025-08-11', yesterday], ['new', TODAY, '2027-08-10']), TODAY);
+    const notYet = M.careerSpans(seasonsOf(['old', '2025-08-12', TODAY], ['new', tomorrow, '2027-08-11']), TODAY);
+    const okToday = today.map((sp) => sp.id).join() === 'old,new' && !today[0].toDate && today[1].toDate && today[1].vertexDate === TODAY;
+    const okNotYet = notYet.map((sp) => sp.id).join() === 'old' && notYet[0].toDate && notYet[0].vertexDate === TODAY;
+    if (okToday && okNotYet) ok('V7c-a boundary', 'a season starting today is plotted and in progress; one starting tomorrow is not, and the last day of the old one is still to date');
+    else bad('V7c-a boundary', `starts today ${JSON.stringify(today)}; starts tomorrow ${JSON.stringify(notYet)}`);
+  }
+
+  // b. The enable rule.
+  {
+    const wc = careerCase('windexcup');
+    const wcPast = careerCase('windexcup', wc.spans.find((sp) => !sp.toDate).id);
+    const yc = careerCase('ycwindex');
+    const ycPlotted = new Set(yc.players.map((p) => p.player_id));
+    const rowRule = new Set(yc.a.rows.filter((r) => ycPlotted.has(r.player_id)).map((r) => r.season_id)).size >= M.MIN_CAREER_SEASONS;
+    const sp = M.careerSpans(seasonsOf(['a', '2024-01-01', '2024-12-31'], ['b', '2025-01-01', '2025-12-31'], ['c', '2026-01-01', '2026-12-31']), TODAY);
+    const two = M.careerEnabled(sp, [crow('b', 'p0', 5), crow('c', 'p0', 3)], ['p0'], 'c');
+    const zeroRounds = M.careerEnabled(sp, [crow('b', 'p0', 0, 0), crow('c', 'p0', 3)], ['p0'], 'c');
+    const otherPlayer = M.careerEnabled(sp, [crow('b', 'p9', 5), crow('c', 'p0', 3)], ['p0'], 'c');
+    const noneInProgress = M.careerEnabled(
+      M.careerSpans(seasonsOf(['a', '2024-01-01', '2024-12-31'], ['b', '2025-01-01', '2025-12-31']), TODAY),
+      [crow('a', 'p0', 5), crow('b', 'p0', 3)], ['p0'], 'b',
+    );
+    if (wc.enabled && !wcPast.enabled && !yc.enabled && rowRule && two && !zeroRounds && !otherPlayer && !noneInProgress) {
+      ok('V7c-b enable', 'windexcup on for its season in progress, off on a finished one; ycwindex (one season played) off, where counting rows would turn it on; synthetic: two played seasons on, a 0-round season or another player\'s does not count, no season in progress off');
+    } else {
+      bad('V7c-b enable', `wc=${wc.enabled} wcPast=${wcPast.enabled} yc=${yc.enabled} rowRule=${rowRule} two=${two} zeroRounds=${zeroRounds} otherPlayer=${otherPlayer} noneInProgress=${noneInProgress}`);
+    }
+  }
+
+  // c. Joiners: "joined 2026", never a 0 in a league they were not in.
+  {
+    const c = careerCase('windexcup');
+    const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
+    const lines = M.activeLinesOf(c.data);
+    const joiners = lines.filter((l) => c.data.firstSpan.get(l.id) > 0);
+    const cursors = [M.PAD_T + 20, M.PAD_T + 130, M.PAD_T + 240];
+    const problems = [];
+    let preJoin = 0;
+    for (const l of joiners) {
+      const first = c.data.firstSpan.get(l.id);
+      c.data.dates.forEach((d, k) => {
+        const row = M.buildCareerTooltipRows(c.data, d, [l.id], M.PAD_T + 130, s).find((r) => r.id === l.id);
+        if (k < first) {
+          preJoin++;
+          if (!row || row.joined !== c.spans[first].label || row.svgY !== null) problems.push(`${l.id} @ ${d}: ${JSON.stringify(row)}`);
+          if (cursors.some((cy) => M.buildCareerTooltipRows(c.data, d, [], cy, s).some((r) => r.id === l.id))) problems.push(`${l.id} in the nearest-5 before joining @ ${d}`);
+        } else if (!row || row.joined || row.svgY === null) {
+          problems.push(`${l.id} @ ${d} after joining: ${JSON.stringify(row)}`);
+        }
+      });
+    }
+    // Arm: plain buildTooltipRows, the season before a joiner's first, reports 0 with a dot.
+    const j = joiners[0];
+    const before = j ? c.data.dates[c.data.firstSpan.get(j.id) - 1] : TODAY;
+    const invented = j ? M.buildTooltipRows(lines, c.toX(before), [j.id], M.PAD_T, s).find((r) => r.id === j.id) : null;
+    const thisSeason = joiners.filter((l) => c.spans[c.data.firstSpan.get(l.id)].toDate).length;
+    if (problems.length === 0 && preJoin > 0 && thisSeason > 0 && invented && invented.value === 0 && invented.svgY !== null) {
+      ok('V7c-c joiners', `${joiners.length} players joined after the first season (${thisSeason} this season): a "joined" row with no dot at ${preJoin} earlier seasons, never in the nearest-5; plain rows would show 0 with a dot`);
+    } else {
+      bad('V7c-c joiners', `${problems.slice(0, 3).join('; ')} preJoin=${preJoin} thisSeason=${thisSeason} invented=${JSON.stringify(invented)}`);
+    }
+  }
+
+  // d. A season sat out carries the total flat, with its own vertex.
+  {
+    const sp = M.careerSpans(seasonsOf(['a', '2023-12-01', '2024-11-30'], ['b', '2024-12-01', '2025-11-30'], ['c', '2025-12-01', '2026-11-30']), TODAY);
+    const d = M.buildCareerData([crow('a', 'p0', 10), crow('c', 'p0', 5)], sp, people(1));
+    const l = d.lines[0];
+    if (l.points.map((p) => p.y).join() === '0,10,10,15' && l.points[2].date === '2025-11-30' && l.playedDates.length === 2) {
+      ok('V7c-d sat-out', 'vertices 0, 10, 10, 15: flat through the missed season, which keeps its vertex');
+    } else {
+      bad('V7c-d sat-out', `points ${JSON.stringify(l.points)} played ${l.playedDates}`);
+    }
+  }
+
+  // e. The first day of a new season: on, labelled, and reachable.
+  {
+    const next = fixture.alltime.windexcup.seasons.find((sp) => sp.start_date > TODAY);
+    const c = careerCase('windexcup', next.id, next.start_date);
+    const last = c.spans[c.spans.length - 1];
+    const prev = c.spans[c.spans.length - 2];
+    const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
+    const labels = M.buildCareerTicks(c.spans, c.toX).filter((t) => t.grid === false);
+    const gapPx = s.plotW * (labels[labels.length - 1].nx - labels[labels.length - 2].nx);
+    const snapped = M.nearestDate(c.data.dates, c.toX, s, s.toSvgX(c.toX(last.vertexDate)));
+    const header = M.careerHeaderAt(c.data, last.vertexDate);
+    const rows = M.buildCareerTooltipRows(c.data, last.vertexDate, [], M.PAD_T + 130, s);
+    const flat = M.activeLinesOf(c.data).every((l) => l.points[l.points.length - 1].y === l.points[l.points.length - 2].y);
+    const problems = [];
+    if (!c.enabled) problems.push('not enabled');
+    if (!(last.toDate && last.vertexDate === next.start_date && !prev.toDate)) problems.push(`last span ${JSON.stringify(last)}`);
+    if (!(c.toX(last.vertexDate) > c.toX(prev.vertexDate))) problems.push("today's vertex is not right of the last season's");
+    if (snapped !== next.start_date) problems.push(`snaps to ${snapped}`);
+    if (header !== `${last.label} season to date` || M.careerHeaderAt(c.data, prev.vertexDate) !== `${prev.label} season`) problems.push(`headers "${header}" / "${M.careerHeaderAt(c.data, prev.vertexDate)}"`);
+    if (gapPx < 30) problems.push(`last two labels ${gapPx.toFixed(1)}px apart`);
+    if (!flat || rows.length === 0 || !finiteDomain(c.data)) problems.push(`flat=${flat} rows=${rows.length} finite=${finiteDomain(c.data)}`);
+    if (problems.length === 0) ok('V7c-e rollover day', `${next.start_date}: on, "${header}", snaps to today rather than ${prev.label}'s vertex, labels ${gapPx.toFixed(0)}px apart, every line flat into the new season`);
+    else bad('V7c-e rollover day', problems.join('; '));
+  }
+
+  // f. A plotted player with no rows, and no seasons at all.
+  {
+    const sp = M.careerSpans(seasonsOf(['a', '2025-01-01', '2025-12-31'], ['b', '2026-01-01', '2026-12-31']), TODAY);
+    const d = M.buildCareerData([crow('a', 'p0', 7), crow('b', 'p0', -2)], sp, people(2));
+    const p1 = d.lines.find((l) => l.id === 'p1');
+    const none = M.buildCareerData([crow('a', 'p0', 7)], [], people(1));
+    if (p1.points.length === 0 && !d.firstSpan.has('p1') && M.activeLinesOf(d).length === 1 && finiteDomain(d) &&
+        none.lines.every((l) => l.points.length === 0) && none.yMin === -10 && none.yMax === 10 && M.careerToX([])('2026-01-01') === 0) {
+      ok('V7c-f empty', 'a player with no rows draws nothing; no seasons -> no lines, domain [-10, 10], no throw');
+    } else {
+      bad('V7c-f empty', `p1 pts=${p1.points.length} active=${M.activeLinesOf(d).length} none=[${none.yMin}, ${none.yMax}]`);
+    }
+  }
+
+  // g. Joining on a season's first day, with a round that day: the start shares x with
+  //    the vertex, so it is dropped — or valueAt, and the tooltip, would read its 0.
+  {
+    const sp = M.careerSpans(seasonsOf(['a', '2025-08-11', M.windowStartOf(TODAY, 1)], ['b', TODAY, '2027-08-10']), TODAY);
+    const d = M.buildCareerData([crow('a', 'p0', 5), crow('b', 'p0', 2), crow('b', 'p1', 4)], sp, people(2));
+    const p1 = d.lines.find((l) => l.id === 'p1');
+    const s = M.makeScales(SVG_W, d.yMin, d.yMax);
+    const row = M.buildCareerTooltipRows(d, TODAY, ['p1'], M.PAD_T, s).find((r) => r.id === 'p1');
+    const x = M.careerToX(sp)(TODAY);
+    const kept = M.valueAt([{ x, y: 0, date: TODAY }, { x, y: 4, date: TODAY }], x);
+    if (p1.points.length === 1 && p1.points[0].y === 4 && row && row.value === 4 && kept === 0) {
+      ok('V7c-g first-day joiner', 'one vertex at 4 and the tooltip reads 4; with the start kept, valueAt would read 0');
+    } else {
+      bad('V7c-g first-day joiner', `points ${JSON.stringify(p1.points)} row ${JSON.stringify(row)} kept ${kept}`);
+    }
+  }
+}
+
+/* ── V9c ── Career tooltip order; joined rows last ─────────────────────────── */
+function v9c() {
+  const c = careerCase('windexcup');
+  const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
+  const lines = M.activeLinesOf(c.data);
+  const ids = lines.map((l) => l.id);
+  const firstOf = (id) => c.data.firstSpan.get(id);
+  const joiners = ids.filter((id) => firstOf(id) > 0);
+  const selections = [[], ids.slice(0, 2), ids.slice(0, M.MAX_SELECTED), joiners.slice(0, M.MAX_SELECTED)];
+  const cursors = [M.PAD_T + 20, M.PAD_T + 130, M.PAD_T + 240];
+  let checked = 0;
+  let order = 0;
+  let pixel = 0;
+  let placement = 0;
+  let maxRows = 0;
+  let joinedRows = 0;
+  for (const sel of selections) {
+    for (const cy of cursors) {
+      for (const d of c.data.dates) {
+        const rows = M.buildCareerTooltipRows(c.data, d, sel, cy, s);
+        maxRows = Math.max(maxRows, rows.length);
+        const firstJoined = rows.findIndex((r) => r.joined);
+        if (firstJoined !== -1 && rows.slice(firstJoined).some((r) => !r.joined)) placement++;
+        if (sel.length === 0 && firstJoined !== -1) placement++;
+        if (sel.length > 0 && rows.map((r) => r.id).sort().join() !== [...sel].sort().join()) placement++;
+        if (rows.some((r) => r.ended)) placement++;
+        const positioned = rows.filter((r) => !r.joined);
+        for (let i = 1; i < positioned.length; i++) {
+          const a = positioned[i - 1];
+          const b = positioned[i];
+          if (b.svgY < a.svgY - 1e-9 || (Math.abs(b.svgY - a.svgY) <= 1e-9 && b.value > a.value)) order++;
+        }
+        for (const row of positioned) {
+          const line = lines.find((l) => l.id === row.id);
+          if (Math.abs(s.plotY(M.valueAt(line.points, c.toX(d))) - row.svgY) > 1e-9) pixel++;
+        }
+        const joined = rows.filter((r) => r.joined);
+        for (let i = 1; i < joined.length; i++) if (firstOf(joined[i].id) < firstOf(joined[i - 1].id)) order++;
+        joinedRows += joined.length;
+        checked++;
+      }
+    }
+  }
+  if (order + pixel + placement === 0 && maxRows <= M.MAX_TOOLTIP_ROWS && joinedRows > 0) {
+    ok('V9c windexcup', `${checked} states: order svgY then value, dots on the vertex, exactly the selection when there is one, ${joinedRows} joined rows all last and earliest first, max ${maxRows} rows`);
+  } else {
+    bad('V9c windexcup', `order ${order}, pixel ${pixel}, placement ${placement}, joined rows ${joinedRows}, max rows ${maxRows}`);
+  }
+}
+
+/* ── V13c ── The career line agrees with the All Time leaderboard, two ways ─────
+ * Leaderboard path: every started season's standings merged per player, as
+ * standings.tsx computes All Time. Raw path: fixture rawScoreTotals, summed from
+ * league_scores with no view and no membership join. The two must agree with each
+ * other, and every career line must end on both.
+ */
+function v13c() {
+  for (const key of FIXTURES) {
+    const c = careerCase(key);
+    const a = c.a;
+    const stored = new Map(a.allTimeLeaderboard.map((e) => [e.player_id, e.total_points]));
+    const raw = new Map(a.rawScoreTotals.map((e) => [e.player_id, e.total_points]));
+    const started = a.seasons.filter((sp) => sp.start_date <= TODAY).sort((x, y) => x.start_date.localeCompare(y.start_date)).map((sp) => sp.id);
+    const merged = new Map();
+    for (const r of a.rows) if (started.includes(r.season_id)) merged.set(r.player_id, (merged.get(r.player_id) ?? 0) + r.total_points);
+
+    const problems = [];
+    const near = (x, y) => typeof x === 'number' && typeof y === 'number' && Math.abs(x - y) < 1e-9;
+    if (merged.size !== stored.size || merged.size !== raw.size) problems.push(`players: leaderboard path ${merged.size}, stored ${stored.size}, raw ${raw.size}`);
+    for (const [id, total] of merged) {
+      if (!near(total, stored.get(id))) problems.push(`${id} leaderboard path ${total} vs stored ${stored.get(id)}`);
+      if (!near(total, raw.get(id))) problems.push(`${id} leaderboard path ${total} vs raw ${raw.get(id)}`);
+    }
+
+    const seasonLines = new Map(M.activeLinesOf(c.season).map((l) => [l.id, l]));
+    let careers = 0;
+    let vertices = 0;
+    for (const l of M.activeLinesOf(c.data)) {
+      const final = l.points[l.points.length - 1].y;
+      if (!near(final, merged.get(l.id)) || !near(final, raw.get(l.id))) problems.push(`${l.id} career ends ${final}, leaderboard ${merged.get(l.id)}, raw ${raw.get(l.id)}`);
+      // Every vertex is the sum of that player's seasons through it.
+      const first = c.data.firstSpan.get(l.id);
+      const vs = l.points.slice(l.points.length - (started.length - first));
+      started.slice(first).forEach((sid, j) => {
+        const want = a.rows.filter((r) => r.player_id === l.id && started.indexOf(r.season_id) >= 0 && started.indexOf(r.season_id) <= first + j).reduce((t, r) => t + r.total_points, 0);
+        if (!vs[j] || !near(vs[j].y, want)) problems.push(`${l.id} vertex ${j} ${vs[j] && vs[j].y}, want ${want}`);
+        vertices++;
+      });
+      // The season in progress, against the Season chart's own line.
+      const before = l.points.length > 2 ? l.points[l.points.length - 2].y : 0;
+      // No Season line means no points yet this season: 0.
+      const sl = seasonLines.get(l.id);
+      const seasonTotal = sl ? sl.points[sl.points.length - 1].y : 0;
+      if (!near(final - before, seasonTotal)) problems.push(`${l.id} season ${final - before} vs Season chart ${seasonTotal}`);
+      careers++;
+    }
+    if (problems.length === 0 && careers > 0) {
+      ok(`V13c ${key}`, `${merged.size} players: leaderboard path == stored leaderboard == raw score sums; ${careers} career lines end on it, ${vertices} vertices each their seasons' sum, season in progress == Season chart`);
+    } else {
+      bad(`V13c ${key}`, problems.slice(0, 4).join('; ') || 'no career lines');
+    }
+  }
+
+  // Falsifier: half points truncated, as an integer read of total_points would, must
+  // leave some career off the leaderboard — the 2021 and 2022 halves are real.
+  const c = careerCase('windexcup');
+  const stored = new Map(c.a.allTimeLeaderboard.map((e) => [e.player_id, e.total_points]));
+  const truncated = M.buildCareerData(c.a.rows.map((r) => ({ ...r, total_points: Math.trunc(r.total_points) })), c.spans, c.players);
+  const off = M.activeLinesOf(truncated).filter((l) => l.points[l.points.length - 1].y !== stored.get(l.id)).length;
+  if (off > 0) ok('V13c falsifier', `truncating half points puts ${off} careers off the leaderboard (test discriminates)`);
+  else bad('V13c falsifier', 'truncated half points still reconcile — V13c cannot see them');
+}
+
+/* ── V-pills-c ── One pill set in every range ──────────────────────────────── */
+function vPillsC() {
+  for (const key of FIXTURES) {
+    const c = careerCase(key);
+    const seasonIds = M.activeLinesOf(c.season).map((l) => l.id);
+    const careerIds = M.activeLinesOf(c.data).map((l) => l.id);
+    const models = ['season', 'd10', 'd4', 'career'].map((requested) =>
+      M.historyModel({ season: c.season, careerRows: c.a.rows, spans: c.spans, standings: c.f.standings, seasonId: c.seasonId, todayIso: TODAY, requested }),
+    );
+    const pills = models[0].pills.map((p) => p.id);
+    const oneSet = new Set(models.map((m) => m.pills.map((p) => p.id).join())).size === 1;
+    const standingsOrder = c.f.standings.map((p) => p.player_id).filter((id) => pills.includes(id)).join() === pills.join();
+    const covered = seasonIds.every((id) => pills.includes(id)) && (!c.enabled || careerIds.every((id) => pills.includes(id)));
+    const exact = pills.every((id) => seasonIds.includes(id) || (c.enabled && careerIds.includes(id)));
+    if (oneSet && standingsOrder && covered && exact) {
+      ok(`V-pills-c ${key}`, `${pills.length} pills, the same in all 4 ranges, standings order: every player with a Season line${c.enabled ? ` or a career line (${careerIds.length})` : ' (All time off)'} and no one else`);
+    } else {
+      bad(`V-pills-c ${key}`, `oneSet=${oneSet} standingsOrder=${standingsOrder} covered=${covered} exact=${exact} pills ${pills.join()}`);
+    }
+  }
+}
+
+/* ── V-reach ── All time is reachable when Season has nothing to draw ─────────
+ * HistoryChart renders from historyModel() and nothing else: the "No history data."
+ * gate, the range toggle's options and value, and the pills. The pure half runs the
+ * model on the first day of a season, before anyone has scored. The static half parses
+ * the component and proves it renders from the model — with an arm that parses the
+ * pre-fix component out of git, which gated the whole chart on Season lines, and must
+ * fail the same parse.
+ */
+const PRE_REACH_COMMIT = '432eb72';
+
+function componentRendersFromModel(ts, text, fileName) {
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const gates = [];
+  const toggles = [];
+  const pillMaps = [];
+  const visit = (node) => {
+    if (ts.isIfStatement(node) && node.thenStatement.getText(sf).includes('No history data.')) gates.push(node.expression.getText(sf));
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(sf) === 'SegmentedToggle') {
+      const attr = (n) => {
+        const a = node.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === n);
+        return a && a.initializer ? a.initializer.getText(sf) : null;
+      };
+      toggles.push({ options: attr('options'), value: attr('value') });
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.getText(sf) === 'map' && node.getText(sf).includes('togglePlayer')) {
+      pillMaps.push(node.expression.expression.getText(sf));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  const problems = [];
+  if (!/historyModel\(/.test(text)) problems.push('never calls historyModel');
+  if (gates.length !== 1 || !/\bmodel\b/.test(gates[0]) || /activeLines/.test(gates[0])) problems.push(`"No history data." gated on ${JSON.stringify(gates)}`);
+  if (toggles.length !== 1 || toggles[0].options !== '{model.options}' || toggles[0].value !== '{model.range}') problems.push(`range toggle ${JSON.stringify(toggles)}`);
+  if (pillMaps.length !== 1 || pillMaps[0] !== 'model.pills') problems.push(`pills mapped from ${JSON.stringify(pillMaps)}`);
+  return problems;
+}
+
+function vReach() {
+  // Day one of Windex Cup's next season: 0 Season lines, seven seasons played.
+  {
+    const f = fixture.windexcup;
+    const a = fixture.alltime.windexcup;
+    const next = a.seasons.find((sp) => sp.start_date > TODAY);
+    const day = next.start_date;
+    const season = M.buildChartData([], f.standings, day, day);
+    const spans = M.careerSpans(a.seasons, day);
+    const m = M.historyModel({ season, careerRows: a.rows, spans, standings: f.standings, seasonId: next.id, todayIso: day, requested: 'season' });
+    const opt = Object.fromEntries(m.options.map((o) => [o.key, o]));
+    const played = new Set(a.rows.filter((r) => r.rounds_played > 0 && spans.some((sp) => sp.id === r.season_id)).map((r) => r.season_id)).size;
+    const problems = [];
+    if (M.activeLinesOf(season).length !== 0) problems.push('precondition: the Season chart has lines');
+    if (played < M.MIN_CAREER_SEASONS) problems.push(`precondition: ${played} seasons played`);
+    if (m.range !== 'career') problems.push(`draws ${m.range}`);
+    if (opt.career.disabled || opt.career.label !== 'All time') problems.push(`All time option ${JSON.stringify(opt.career)}`);
+    if (!opt.season.disabled || !opt.d10.disabled || !opt.d4.disabled) problems.push('a Season range is on with no Season lines');
+    if (!m.career || M.activeLinesOf(m.career).length !== f.standings.length || m.pills.length !== f.standings.length) problems.push(`career lines ${m.career && M.activeLinesOf(m.career).length}, pills ${m.pills.length}`);
+    if (problems.length === 0) ok('V-reach day one', `${day}, 0 Season lines, ${played} seasons played: asked for Season, draws All time; Season, 10 days, 4 days off; ${m.pills.length} pills from career lines`);
+    else bad('V-reach day one', problems.join('; '));
+  }
+
+  // Nothing on offer: YC Windex's next season, day one, one season played. The chart
+  // says so rather than drawing an empty axis.
+  {
+    const y = fixture.ycwindex;
+    const ya = fixture.alltime.ycwindex;
+    const next = ya.seasons.find((sp) => sp.start_date > TODAY);
+    const m = M.historyModel({
+      season: M.buildChartData([], y.standings, next.start_date, next.start_date),
+      careerRows: ya.rows,
+      spans: M.careerSpans(ya.seasons, next.start_date),
+      standings: y.standings,
+      seasonId: next.id,
+      todayIso: next.start_date,
+      requested: 'career',
+    });
+    if (m.range === null && m.options.every((o) => o.disabled) && m.pills.length === 0) ok('V-reach nothing on offer', `ycwindex ${next.start_date}: no range on offer, range null -> "No history data."`);
+    else bad('V-reach nothing on offer', `range ${m.range}, options ${JSON.stringify(m.options)}, pills ${m.pills.length}`);
+  }
+
+  // Mid-season the model reproduces the old rules: the three Season ranges on exactly
+  // when they were, an unavailable ask falls back to Season.
+  {
+    const problems = [];
+    for (const key of FIXTURES) {
+      const c = careerCase(key);
+      for (const requested of ['season', 'd10', 'd4', 'career']) {
+        const m = M.historyModel({ season: c.season, careerRows: c.a.rows, spans: c.spans, standings: c.f.standings, seasonId: c.seasonId, todayIso: TODAY, requested });
+        const opt = Object.fromEntries(m.options.map((o) => [o.key, o]));
+        const old = { season: true };
+        for (const rk of WINDOWS) old[rk] = M.rangeHasRounds(c.season.dates, M.windowStartOf(TODAY, M.RANGE_DAYS[rk]), TODAY);
+        old.career = c.enabled;
+        for (const rk of ['season', 'd10', 'd4', 'career']) if (opt[rk].disabled === old[rk]) problems.push(`${key} ${rk} disabled=${opt[rk].disabled}`);
+        const want = old[requested] ? requested : 'season';
+        if (m.range !== want) problems.push(`${key} asked ${requested}, draws ${m.range}, want ${want}`);
+      }
+    }
+    if (problems.length === 0) ok('V-reach mid-season', 'both leagues, all 4 asks: options on exactly as the pre-model rules, an ask off offer falls back to Season');
+    else bad('V-reach mid-season', problems.slice(0, 4).join('; '));
+  }
+
+  // Static half: the component renders from the model. Arm: the pre-fix component fails.
+  const ts = require(path.join(EXPO, 'node_modules', 'typescript'));
+  const now = componentRendersFromModel(ts, fs.readFileSync(COMPONENT, 'utf8'), 'HistoryChart.tsx');
+  if (now.length === 0) ok('V-reach component', 'HistoryChart gates "No history data." on the model, and takes the toggle options, its value and the pills from it');
+  else bad('V-reach component', now.join('; '));
+  const before = componentRendersFromModel(
+    ts,
+    execFileSync('git', ['show', `${PRE_REACH_COMMIT}:windex-expo/components/HistoryChart.tsx`], { cwd: EXPO, encoding: 'utf8', stdio: 'pipe' }),
+    'HistoryChart@pre.tsx',
+  );
+  if (before.some((p) => p.startsWith('"No history data." gated on'))) ok('V-reach arm', `HistoryChart@${PRE_REACH_COMMIT}, which hid the chart without Season lines, fails the same parse (${before.length} problems)`);
+  else bad('V-reach arm', `HistoryChart@${PRE_REACH_COMMIT} passes the gate parse — the check cannot see the bug: ${before.join('; ')}`);
+}
+
 /* ── Run ───────────────────────────────────────────────────────────────────── */
 console.log('\n=== V1  interpolation vs rendered pixel ===');
 run('V1 windexcup', () => v1('windexcup'));
@@ -1280,6 +1875,24 @@ console.log('\n=== V-pills  players, order, hues across ranges ===');
 run('V-pills', vPills);
 console.log('\n=== V-clamp  clamping is exact ===');
 run('V-clamp', vClamp);
+console.log('\n=== All time  V-order  seasons in start_date order, never id ===');
+run('V-order', vOrder);
+console.log('\n=== V1c  career interpolation vs rendered pixel ===');
+run('V1c', v1c);
+console.log('\n=== V2c  selection never moves the career axis ===');
+run('V2c', v2c);
+console.log('\n=== V3c  season gridlines and labels ===');
+run('V3c', v3c);
+console.log('\n=== V7c  degenerate and boundary states ===');
+run('V7c', v7c);
+console.log('\n=== V9c  career tooltip order ===');
+run('V9c', v9c);
+console.log('\n=== V13c  career == All Time leaderboard, two ways ===');
+run('V13c', v13c);
+console.log('\n=== V-pills-c  one pill set in every range ===');
+run('V-pills-c', vPillsC);
+console.log('\n=== V-reach  All time reachable with no Season lines ===');
+run('V-reach', vReach);
 console.log(`\n=== V12  Season unchanged vs ${BASELINE_COMMIT} ===`);
 run('V12', v12);
 console.log(`\n=== V14  Standings toggle identical to ${BASELINE_COMMIT} (static) ===`);

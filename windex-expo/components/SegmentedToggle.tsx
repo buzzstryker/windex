@@ -12,7 +12,7 @@ type Props<K extends string> = {
 
 /**
  * The olive segmented control: Leaderboard / History on Standings, and the History
- * chart's Season / 10 days / 4 days. One component, so the two cannot drift apart.
+ * chart's Season / 10 days / 4 days / All time. One component, so the two cannot drift apart.
  *
  * Styles and style-array order are lifted verbatim from standings.tsx as of commit
  * 979b345, and the Standings toggle must render identically to that commit —

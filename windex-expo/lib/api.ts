@@ -508,14 +508,7 @@ export async function generateBroadcastNotes(
   });
 }
 
-export function seasonLabel(s: Season): string {
-  if (s.name) return s.name;
-  if (!s.start_date) return s.id.slice(0, 8);
-  const start = new Date(s.start_date + 'T00:00:00');
-  const end = s.end_date ? new Date(s.end_date + 'T00:00:00') : start;
-  const mid = new Date((start.getTime() + end.getTime()) / 2);
-  return String(mid.getFullYear());
-}
+export { seasonLabel } from './seasonLabel';
 
 /* --- Championship results --- */
 

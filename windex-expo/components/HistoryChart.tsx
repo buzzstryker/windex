@@ -18,25 +18,32 @@ import {
   RANGE_DAYS,
   activeLinesOf,
   assignHues,
+  buildCareerTicks,
+  buildCareerTooltipRows,
   buildChartData,
   buildDayTicks,
   buildMonthTicks,
   buildTooltipRows,
+  careerHeaderAt,
+  careerSpans,
+  careerToX,
   formatDay,
   formatFull,
+  historyModel,
   isoOf,
   makeScales,
   makeToX,
   nearestDate,
   niceTickValues,
   polylinePoints,
-  rangeHasRounds,
   windowChartData,
   windowStartOf,
+  type CareerRow,
   type ChartData,
   type MonthTick,
   type RangeKey,
   type ScoreRow,
+  type SeasonLike,
 } from '@/lib/historyChartMath';
 
 type Props = {
@@ -45,6 +52,8 @@ type Props = {
   standings: StandingRow[];
   seasonStartDate: string;
   seasonEndDate: string;
+  /** The group's seasons, for All time. Unstarted ones may be included; careerSpans drops them. */
+  seasons: SeasonLike[];
 };
 
 type RangeView = {
@@ -102,12 +111,31 @@ async function fetchSeasonScores(seasonId: string, groupId: string): Promise<Sco
   return allScores;
 }
 
-export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, seasonEndDate }: Props) {
+/** All time reads season_standings — the view the All Time leaderboard reads — for the
+ *  players on screen, in one request. Null on any failure, which leaves All time
+ *  disabled rather than taking the season chart down with it. */
+async function fetchCareerRows(groupId: string, playerIds: string[]): Promise<CareerRow[] | null> {
+  const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
+  const token = await getStoredAccessToken();
+  const anonKey = getSupabaseAnonKey();
+  if (!base || !token || playerIds.length === 0) return null;
+  const headers = { Authorization: `Bearer ${token}`, apikey: anonKey || token };
+  const inList = playerIds.map((id) => `"${id}"`).join(',');
+  const res = await fetch(
+    `${base}/rest/v1/season_standings?group_id=eq.${encodeURIComponent(groupId)}&player_id=in.(${inList})&select=season_id,player_id,rounds_played,total_points`,
+    { headers },
+  );
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, seasonEndDate, seasons }: Props) {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const series = scheme === 'dark' ? CHART_SERIES_DARK : CHART_SERIES_LIGHT;
 
   const [chartState, setChartState] = useState<ChartData | null>(null);
+  const [careerRows, setCareerRows] = useState<CareerRow[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [svgWidth, setSvgWidth] = useState(0);
   const [range, setRange] = useState<RangeKey>('season');
@@ -121,25 +149,35 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
 
   const todayIso = useMemo(() => isoOf(new Date()), []);
 
+  // All time's seasons: started by the chart's own local date, in start_date order.
+  const spans = useMemo(() => careerSpans(seasons, todayIso), [seasons, todayIso]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchSeasonScores(seasonId, groupId)
-      .then((scores) => {
+    // All time is only ever offered on the season in progress, so no other season
+    // pays for its request.
+    const onSeasonInProgress = spans.some((sp) => sp.toDate && sp.id === seasonId);
+    Promise.all([
+      fetchSeasonScores(seasonId, groupId),
+      onSeasonInProgress
+        ? fetchCareerRows(groupId, standings.map((r) => r.player_id)).catch(() => null)
+        : Promise.resolve(null),
+    ])
+      .then(([scores, rows]) => {
         if (cancelled) return;
         const next = buildChartData(scores, standings, seasonStartDate, todayIso);
         setChartState(next);
+        setCareerRows(rows);
         setSelected([]);
         setPinned(null);
         setHovered(null);
-        // New data can empty the active window — a season switch lands on a season
-        // with no recent rounds. Fall back to Season in the same batch, so a
-        // disabled window is never rendered. Data only changes here and todayIso is
-        // fixed at mount, so no other path can disable the active range.
-        setRange((prev) =>
-          prev === 'season' || rangeHasRounds(next.dates, windowStartOf(todayIso, RANGE_DAYS[prev]), todayIso)
-            ? prev
-            : 'season',
+        // New data can take the active range off offer — a season switch lands on a
+        // season with no recent rounds, or on one not in progress. Settle it in the same
+        // batch, by the same rule the render uses, so a range off offer is never drawn.
+        // Data only changes here and todayIso is fixed at mount.
+        setRange(
+          (prev) => historyModel({ season: next, careerRows: rows, spans, standings, seasonId, todayIso, requested: prev }).range ?? 'season',
         );
       })
       .catch(() => {
@@ -151,46 +189,50 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     return () => {
       cancelled = true;
     };
-  }, [seasonId, groupId, standings, seasonStartDate, seasonEndDate, todayIso]);
+  }, [seasonId, groupId, standings, seasonStartDate, seasonEndDate, todayIso, spans]);
 
-  // A range with no scored round in it is disabled before the tap rather than
-  // showing an empty axis after it. Reads dates already fetched — no request.
-  const enabled = useMemo(() => {
-    const dates = chartState?.dates ?? [];
-    return {
-      d10: rangeHasRounds(dates, windowStartOf(todayIso, RANGE_DAYS.d10), todayIso),
-      d4: rangeHasRounds(dates, windowStartOf(todayIso, RANGE_DAYS.d4), todayIso),
-    };
-  }, [chartState, todayIso]);
+  // Every decision before drawing — the ranges on offer, the range to draw, the pills,
+  // and whether there is anything to show at all — comes from historyModel, so
+  // verify.js checks the decisions this renders (V-reach).
+  const model = useMemo(
+    () => (chartState ? historyModel({ season: chartState, careerRows, spans, standings, seasonId, todayIso, requested: range }) : null),
+    [chartState, careerRows, spans, standings, seasonId, todayIso, range],
+  );
 
-  // Everything the PLOT draws from, for the active range. Pills and hues do not
-  // come from here: they read the season lines, so the player set and every
-  // player's color hold still when the range changes.
+  // Everything the PLOT draws from, for the range on screen. Pills and hues do not
+  // come from here: they read model.pills, so the player set and every player's
+  // color hold still when the range changes.
   const view = useMemo((): RangeView | null => {
-    if (!chartState) return null;
-    if (range === 'season') {
+    if (!chartState || !model || model.range === null) return null;
+    if (model.range === 'season') {
       const toX = makeToX(seasonStartDate, todayIso);
       return { data: chartState, toX, ticks: buildMonthTicks(seasonStartDate, todayIso, toX), dates: chartState.dates };
     }
-    const days = RANGE_DAYS[range];
+    if (model.range === 'career') {
+      if (!model.career) return null;
+      const toX = careerToX(model.career.spans);
+      return { data: model.career, toX, ticks: buildCareerTicks(model.career.spans, toX), dates: model.career.dates };
+    }
+    const days = RANGE_DAYS[model.range];
     const windowStart = windowStartOf(todayIso, days);
     const data = windowChartData(chartState, seasonStartDate, windowStart, todayIso);
     // One toX for the window's vertices AND its day ticks.
     const toX = makeToX(windowStart, todayIso);
     return { data, toX, ticks: buildDayTicks(todayIso, days, toX), dates: data.dates };
-  }, [chartState, range, seasonStartDate, todayIso]);
+  }, [chartState, model, seasonStartDate, todayIso]);
 
   const onLayout = (e: LayoutChangeEvent) => setSvgWidth(e.nativeEvent.layout.width);
 
   if (loading) return <ActivityIndicator style={styles.spinner} size="large" />;
 
-  const activeLines = activeLinesOf(chartState);
-  if (activeLines.length === 0 || !view) {
+  // Not "no Season lines": in a season just begun nobody has one, and All time is then
+  // the only thing worth showing. The model says when no range at all is on offer.
+  if (!model || model.range === null || !view) {
     return <Text style={[styles.empty, { color: c.icon }]}>No history data.</Text>;
   }
 
-  // Same players in the same order as activeLines — windowChartData keeps every
-  // line that has points — but with the range's points.
+  // The range's lines, in standings order. A pill whose player has no line in this
+  // range simply highlights nothing here.
   const plottedLines = activeLinesOf(view.data);
   const { yMin, yMax } = view.data;
   const toX = view.toX;
@@ -199,7 +241,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   const xTicks = view.ticks;
   const yTicks = niceTickValues(yMin, yMax, 6);
 
-  const allIds = activeLines.map((l) => l.id);
+  const allIds = model.pills.map((p) => p.id);
   const hues = assignHues(allIds, selected);
   const colorFor = (id: string) => {
     const slot = hues.get(id);
@@ -233,7 +275,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   // no text measurement to hand-lay-out SVG text against. The crosshair and the
   // dots stay in SVG.
   let tooltip: {
-    date: string;
+    header: string;
     rows: ReturnType<typeof buildTooltipRows>;
     left: number;
     top: number;
@@ -246,7 +288,10 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     // A tap gives an x, not a meaningful y, so the touch path ranks the nearest-5
     // from the plot's vertical midpoint.
     const cy = cursorY ?? PAD_T + s.plotH / 2;
-    const rows = buildTooltipRows(plottedLines, nx, selected, cy, s);
+    const career = model.range === 'career' ? model.career : null;
+    const rows = career
+      ? buildCareerTooltipRows(career, activeDate, selected, cy, s)
+      : buildTooltipRows(plottedLines, nx, selected, cy, s);
     if (rows.length > 0) {
       const height = TOOLTIP_PAD * 2 + TOOLTIP_HEADER_H + rows.length * TOOLTIP_ROW_H;
       const cx = s.toSvgX(nx);
@@ -261,7 +306,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
         : PAD_T + s.plotH / 2;
       const top = Math.max(PAD_T, Math.min(meanY - height / 2, CHART_H - PAD_B - height));
 
-      tooltip = { date: activeDate, rows, left, top, height, cx };
+      tooltip = { header: career ? careerHeaderAt(career, activeDate) : formatFull(activeDate), rows, left, top, height, cx };
     }
   }
 
@@ -304,12 +349,8 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
           row it would jump whenever the Clear pill changes the wrap. */}
       <View style={styles.rangeRow}>
         <SegmentedToggle
-          options={[
-            { key: 'season', label: 'Season' },
-            { key: 'd10', label: '10 days', disabled: !enabled.d10 },
-            { key: 'd4', label: '4 days', disabled: !enabled.d4 },
-          ]}
-          value={range}
+          options={model.options}
+          value={model.range}
           onChange={changeRange}
         />
       </View>
@@ -328,7 +369,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
           </Pressable>
         ) : null}
 
-        {activeLines.map((line) => {
+        {model.pills.map((line) => {
           const isSel = selected.includes(line.id);
           const hue = colorFor(line.id);
           // At the cap, unselected pills go genuinely disabled rather than
@@ -388,17 +429,19 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
               );
             })}
 
-            {xTicks.map((tick, i) => (
-              <SvgLine
-                key={`xg-${i}`}
-                x1={s.toSvgX(tick.nx)}
-                y1={PAD_T}
-                x2={s.toSvgX(tick.nx)}
-                y2={CHART_H - PAD_B}
-                stroke={c.border}
-                strokeWidth={0.5}
-              />
-            ))}
+            {xTicks.map((tick, i) =>
+              tick.grid === false ? null : (
+                <SvgLine
+                  key={`xg-${i}`}
+                  x1={s.toSvgX(tick.nx)}
+                  y1={PAD_T}
+                  x2={s.toSvgX(tick.nx)}
+                  y2={CHART_H - PAD_B}
+                  stroke={c.border}
+                  strokeWidth={0.5}
+                />
+              ),
+            )}
             {xTicks.map((tick, i) =>
               tick.label ? (
                 <SvgText
@@ -508,14 +551,18 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
               },
             ]}
           >
-            <Text style={[styles.tooltipHeader, { color: c.icon }]}>{formatFull(tooltip.date)}</Text>
+            <Text style={[styles.tooltipHeader, { color: c.icon }]}>{tooltip.header}</Text>
             {tooltip.rows.map((r) => (
               <View key={r.id} style={styles.tooltipRow}>
                 <View style={[styles.swatch, { backgroundColor: colorFor(r.id) }]} />
                 <Text numberOfLines={1} style={[styles.tooltipName, { color: c.text }]}>
                   {r.name}
                 </Text>
-                {r.ended ? (
+                {r.joined ? (
+                  <Text style={[styles.tooltipEnded, { color: c.icon }]} numberOfLines={1}>
+                    joined {r.joined}
+                  </Text>
+                ) : r.ended ? (
                   <Text style={[styles.tooltipEnded, { color: c.icon }]} numberOfLines={1}>
                     {Math.round(r.value)} · last {formatDay(r.lastDate!)}
                   </Text>
