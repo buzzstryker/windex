@@ -17,6 +17,7 @@ import { Header } from '@/components/Header';
 import { GroupBanner } from '@/components/GroupBanner';
 import { GroupPicker } from '@/components/GroupPicker';
 import { HistoryChart } from '@/components/HistoryChart';
+import { SegmentedToggle } from '@/components/SegmentedToggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors } from '@/constants/theme';
@@ -323,33 +324,14 @@ export default function StandingsScreen() {
       </Pressable>
 
       {/* Leaderboard / History toggle */}
-      <View style={styles.toggleWrap}>
-        <Pressable
-          style={[styles.togglePill, tab === 'leaderboard' && styles.togglePillActive]}
-          onPress={() => setTab('leaderboard')}
-        >
-          <Text style={[styles.toggleText, tab === 'leaderboard' && styles.toggleTextActive]}>
-            Leaderboard
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[
-            styles.togglePill,
-            tab === 'history' && styles.togglePillActive,
-            !historyAvailable && styles.togglePillDisabled,
-          ]}
-          onPress={() => { if (historyAvailable) setTab('history'); }}
-          disabled={!historyAvailable}
-        >
-          <Text style={[
-            styles.toggleText,
-            tab === 'history' && styles.toggleTextActive,
-            !historyAvailable && styles.toggleTextDisabled,
-          ]}>
-            History
-          </Text>
-        </Pressable>
-      </View>
+      <SegmentedToggle
+        options={[
+          { key: 'leaderboard', label: 'Leaderboard' },
+          { key: 'history', label: 'History', disabled: !historyAvailable },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
     </View>
   );
 
@@ -494,34 +476,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     opacity: 0.8,
-  },
-  toggleWrap: {
-    flexDirection: 'row',
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: OLIVE,
-    overflow: 'hidden',
-  },
-  togglePill: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  togglePillActive: {
-    backgroundColor: OLIVE,
-  },
-  togglePillDisabled: {
-    opacity: 0.35,
-  },
-  toggleText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: OLIVE,
-  },
-  toggleTextActive: {
-    color: '#FFFFFF',
-  },
-  toggleTextDisabled: {
-    color: '#999',
   },
   errorBanner: { color: '#c62828', marginBottom: 8, fontSize: 14, paddingHorizontal: 16 },
   spinner: { marginVertical: 24 },

@@ -37,6 +37,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# History chart verification: compiled fresh on every run
+scripts/history-chart/build/
+
 app-example
 
 # generated native folders

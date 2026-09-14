@@ -5,6 +5,7 @@ import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { getStoredAccessToken, type StandingRow } from '@/lib/api';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { SegmentedToggle } from '@/components/SegmentedToggle';
 import {
   CHART_H,
   CHART_SERIES_DARK,
@@ -14,9 +15,11 @@ import {
   PAD_L,
   PAD_R,
   PAD_T,
+  RANGE_DAYS,
   activeLinesOf,
   assignHues,
   buildChartData,
+  buildDayTicks,
   buildMonthTicks,
   buildTooltipRows,
   formatDay,
@@ -27,7 +30,12 @@ import {
   nearestDate,
   niceTickValues,
   polylinePoints,
+  rangeHasRounds,
+  windowChartData,
+  windowStartOf,
   type ChartData,
+  type MonthTick,
+  type RangeKey,
   type ScoreRow,
 } from '@/lib/historyChartMath';
 
@@ -37,6 +45,14 @@ type Props = {
   standings: StandingRow[];
   seasonStartDate: string;
   seasonEndDate: string;
+};
+
+type RangeView = {
+  data: ChartData;
+  toX: (date: string) => number;
+  ticks: MonthTick[];
+  /** Snap domain, limited to what toX spans. */
+  dates: string[];
 };
 
 const TOOLTIP_W = 168;
@@ -94,6 +110,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   const [chartState, setChartState] = useState<ChartData | null>(null);
   const [loading, setLoading] = useState(true);
   const [svgWidth, setSvgWidth] = useState(0);
+  const [range, setRange] = useState<RangeKey>('season');
 
   // Selection, and the two independent pointer paths. `pinned` comes from a tap
   // (touch), `hovered` from a mouse. They are resolved, never merged.
@@ -110,10 +127,20 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     fetchSeasonScores(seasonId, groupId)
       .then((scores) => {
         if (cancelled) return;
-        setChartState(buildChartData(scores, standings, seasonStartDate, todayIso));
+        const next = buildChartData(scores, standings, seasonStartDate, todayIso);
+        setChartState(next);
         setSelected([]);
         setPinned(null);
         setHovered(null);
+        // New data can empty the active window — a season switch lands on a season
+        // with no recent rounds. Fall back to Season in the same batch, so a
+        // disabled window is never rendered. Data only changes here and todayIso is
+        // fixed at mount, so no other path can disable the active range.
+        setRange((prev) =>
+          prev === 'season' || rangeHasRounds(next.dates, windowStartOf(todayIso, RANGE_DAYS[prev]), todayIso)
+            ? prev
+            : 'season',
+        );
       })
       .catch(() => {
         if (!cancelled) setChartState(null);
@@ -126,19 +153,50 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     };
   }, [seasonId, groupId, standings, seasonStartDate, seasonEndDate, todayIso]);
 
+  // A range with no scored round in it is disabled before the tap rather than
+  // showing an empty axis after it. Reads dates already fetched — no request.
+  const enabled = useMemo(() => {
+    const dates = chartState?.dates ?? [];
+    return {
+      d10: rangeHasRounds(dates, windowStartOf(todayIso, RANGE_DAYS.d10), todayIso),
+      d4: rangeHasRounds(dates, windowStartOf(todayIso, RANGE_DAYS.d4), todayIso),
+    };
+  }, [chartState, todayIso]);
+
+  // Everything the PLOT draws from, for the active range. Pills and hues do not
+  // come from here: they read the season lines, so the player set and every
+  // player's color hold still when the range changes.
+  const view = useMemo((): RangeView | null => {
+    if (!chartState) return null;
+    if (range === 'season') {
+      const toX = makeToX(seasonStartDate, todayIso);
+      return { data: chartState, toX, ticks: buildMonthTicks(seasonStartDate, todayIso, toX), dates: chartState.dates };
+    }
+    const days = RANGE_DAYS[range];
+    const windowStart = windowStartOf(todayIso, days);
+    const data = windowChartData(chartState, seasonStartDate, windowStart, todayIso);
+    // One toX for the window's vertices AND its day ticks.
+    const toX = makeToX(windowStart, todayIso);
+    return { data, toX, ticks: buildDayTicks(todayIso, days, toX), dates: data.dates };
+  }, [chartState, range, seasonStartDate, todayIso]);
+
   const onLayout = (e: LayoutChangeEvent) => setSvgWidth(e.nativeEvent.layout.width);
 
   if (loading) return <ActivityIndicator style={styles.spinner} size="large" />;
 
   const activeLines = activeLinesOf(chartState);
-  if (activeLines.length === 0) {
+  if (activeLines.length === 0 || !view) {
     return <Text style={[styles.empty, { color: c.icon }]}>No history data.</Text>;
   }
 
-  const { yMin, yMax } = chartState!;
-  const toX = makeToX(seasonStartDate, todayIso);
+  // Same players in the same order as activeLines — windowChartData keeps every
+  // line that has points — but with the range's points.
+  const plottedLines = activeLinesOf(view.data);
+  const { yMin, yMax } = view.data;
+  const toX = view.toX;
+  const snapDates = view.dates;
   const s = makeScales(svgWidth, yMin, yMax);
-  const monthTicks = buildMonthTicks(seasonStartDate, todayIso, toX);
+  const xTicks = view.ticks;
   const yTicks = niceTickValues(yMin, yMax, 6);
 
   const allIds = activeLines.map((l) => l.id);
@@ -161,6 +219,14 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     });
   };
 
+  // A pin or hover is a position on the old x-axis and means nothing on the new
+  // one. Selection is about players, not positions, so it stays.
+  const changeRange = (next: RangeKey) => {
+    setRange(next);
+    setPinned(null);
+    setHovered(null);
+  };
+
   // --- Tooltip -------------------------------------------------------------
   // A View, not SVG: names need numberOfLines + ellipsis and values need
   // tabular-nums, neither of which react-native-svg's <Text> offers, and RN has
@@ -180,7 +246,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     // A tap gives an x, not a meaningful y, so the touch path ranks the nearest-5
     // from the plot's vertical midpoint.
     const cy = cursorY ?? PAD_T + s.plotH / 2;
-    const rows = buildTooltipRows(activeLines, nx, selected, cy, s);
+    const rows = buildTooltipRows(plottedLines, nx, selected, cy, s);
     if (rows.length > 0) {
       const height = TOOLTIP_PAD * 2 + TOOLTIP_HEADER_H + rows.length * TOOLTIP_ROW_H;
       const cx = s.toSvgX(nx);
@@ -199,8 +265,10 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     }
   }
 
+  // Both pointer paths snap to the range's own dates. makeToX clamps, so an
+  // out-of-window date would otherwise land on the left edge and win the snap there.
   const handlePlotPress = (locationX: number) => {
-    const d = nearestDate(chartState!.dates, toX, s, locationX + PAD_L);
+    const d = nearestDate(snapDates, toX, s, locationX + PAD_L);
     setPinned((prev) => (prev === d ? null : d));
   };
 
@@ -218,7 +286,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
       return;
     }
     setCursorY(y);
-    setHovered(nearestDate(chartState!.dates, toX, s, x));
+    setHovered(nearestDate(snapDates, toX, s, x));
   };
 
   const clearHover = () => {
@@ -231,6 +299,21 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
 
   return (
     <Pressable style={styles.container} onPress={() => setPinned(null)}>
+      {/* Range scopes the whole chart, so it sits above the player pills. Its own
+          row, right-aligned under the Leaderboard / History toggle: below the pill
+          row it would jump whenever the Clear pill changes the wrap. */}
+      <View style={styles.rangeRow}>
+        <SegmentedToggle
+          options={[
+            { key: 'season', label: 'Season' },
+            { key: 'd10', label: '10 days', disabled: !enabled.d10 },
+            { key: 'd4', label: '4 days', disabled: !enabled.d4 },
+          ]}
+          value={range}
+          onChange={changeRange}
+        />
+      </View>
+
       {/* Pills sit ABOVE the plot: a control belongs above what it controls, and
           it keeps the tap target in thumb reach instead of behind a 300px scroll. */}
       <View style={styles.pillRow}>
@@ -305,7 +388,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
               );
             })}
 
-            {monthTicks.map((tick, i) => (
+            {xTicks.map((tick, i) => (
               <SvgLine
                 key={`xg-${i}`}
                 x1={s.toSvgX(tick.nx)}
@@ -316,18 +399,20 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
                 strokeWidth={0.5}
               />
             ))}
-            {monthTicks.map((tick, i) => (
-              <SvgText
-                key={`xl-${i}`}
-                x={s.toSvgX(tick.nx)}
-                y={CHART_H - PAD_B + 14}
-                fontSize={11}
-                fill={c.icon}
-                textAnchor="middle"
-              >
-                {tick.label}
-              </SvgText>
-            ))}
+            {xTicks.map((tick, i) =>
+              tick.label ? (
+                <SvgText
+                  key={`xl-${i}`}
+                  x={s.toSvgX(tick.nx)}
+                  y={CHART_H - PAD_B + 14}
+                  fontSize={11}
+                  fill={c.icon}
+                  textAnchor={tick.anchor ?? 'middle'}
+                >
+                  {tick.label}
+                </SvgText>
+              ) : null,
+            )}
 
             {yMin < 0 && yMax > 0 && (
               <SvgLine
@@ -344,7 +429,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
             {/* Two passes, not a sort and not an opacity trick: SVG paints in
                 document order, so the dimmed field must be emitted first and the
                 highlighted lines second to land on top of it. */}
-            {activeLines
+            {plottedLines
               .filter((l) => !selected.includes(l.id))
               .map((line) => (
                 <Polyline
@@ -357,7 +442,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
                   strokeLinecap="round"
                 />
               ))}
-            {activeLines
+            {plottedLines
               .filter((l) => selected.includes(l.id))
               .map((line) => (
                 <Polyline
@@ -451,6 +536,12 @@ const styles = StyleSheet.create({
   spinner: { marginVertical: 40 },
   empty: { textAlign: 'center', marginTop: 24, fontSize: 15 },
   chartWrap: { height: CHART_H, marginTop: 8 },
+
+  // The toggle's root is a row View, so without a row parent it would stretch to
+  // full width. paddingRight 8 + the container's 8 puts its right edge on the
+  // control bar's marginHorizontal 16, stacking it under the Leaderboard / History
+  // toggle.
+  rangeRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingRight: 8, marginBottom: 8 },
 
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 4 },
   pill: {
