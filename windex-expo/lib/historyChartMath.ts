@@ -123,9 +123,23 @@ export function formatFull(iso: string): string {
 /* ── X mapping ─────────────────────────────────────────────────────────────── */
 
 /**
+ * The last day a season's Season chart covers: today while the season is in progress,
+ * the season's own last day once it has ended.
+ *
+ * x=1 used to be today for every season. For a finished season that stretched the
+ * axis from its start to today — the 2025 season drew across 21.5 months with its
+ * lines ending at x=0.56 — and nothing caught it for as long as the chart existed:
+ * every fixture season was in progress, and V12 holds Season output byte-identical
+ * to a baseline that had the same bug. V-axis builds a finished season.
+ */
+export function seasonAxisEnd(seasonEnd: string, todayIso: string): string {
+  return seasonEnd < todayIso ? seasonEnd : todayIso;
+}
+
+/**
  * The ONE date -> normalized-x mapping. x=0 is `start` — the season start, or a
- * range's window start — and x=1 is TODAY (not season end — a season runs a year
- * and we only ever plot up to now).
+ * range's window start — and x=1 is `todayIso`: today for a window or the season in
+ * progress, the season's last day for a finished one (see seasonAxisEnd).
  *
  * Data vertices, month gridlines and day gridlines all go through this. That
  * sharing is the fix for the tick drift: the ticks used to be laid out evenly at
@@ -890,17 +904,24 @@ export function historyModel(input: {
   spans: CareerSpan[];
   standings: StandingLike[];
   seasonId: string;
+  /** The season's last day. 10 days and 4 days are off once it has passed. */
+  seasonEnd: string;
   todayIso: string;
   requested: RangeKey;
 }): HistoryModel {
-  const { season, careerRows, spans, standings, seasonId, todayIso, requested } = input;
+  const { season, careerRows, spans, standings, seasonId, seasonEnd, todayIso, requested } = input;
   const seasonLines = activeLinesOf(season);
   const hasSeason = seasonLines.length > 0;
   const career = careerRows ? buildCareerData(careerRows, spans, standings) : null;
+  // A window reads its entry value off the Season line at today's mapping; a finished
+  // season's line is mapped to its own last day instead (seasonAxisEnd), so a window
+  // on it would start wrong. Its last days can still hold rounds in the days after it
+  // ends, so rangeHasRounds alone would leave the window on.
+  const windows = hasSeason && seasonEnd >= todayIso;
   const on: Record<RangeKey, boolean> = {
     season: hasSeason,
-    d10: hasSeason && rangeHasRounds(season.dates, windowStartOf(todayIso, RANGE_DAYS.d10), todayIso),
-    d4: hasSeason && rangeHasRounds(season.dates, windowStartOf(todayIso, RANGE_DAYS.d4), todayIso),
+    d10: windows && rangeHasRounds(season.dates, windowStartOf(todayIso, RANGE_DAYS.d10), todayIso),
+    d4: windows && rangeHasRounds(season.dates, windowStartOf(todayIso, RANGE_DAYS.d4), todayIso),
     career: !!careerRows && careerEnabled(spans, careerRows, standings.map((p) => p.player_id), seasonId),
   };
   const drawn = new Set(seasonLines.map((l) => l.id));

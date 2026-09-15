@@ -6,6 +6,7 @@
  *   Season   V1 V2 V3 V5 V7 V9 Hues
  *   Ranges   V1w V2w V3w V7w V9w V13 V-pills V-clamp
  *   All time V-order V1c V2c V3c V7c V9c V13c V-pills-c V-reach
+ *   Axis     V-axis  a finished season's Season chart covers exactly that season
  *   Pins     V12  Season output byte-identical to the pre-ranges commit
  *            V14  Standings toggle styles identical to the pre-extraction commit
  *
@@ -43,6 +44,11 @@
  * 12/12 in both leagues when taken, and V13c holds them, and every career line, to it.
  * Totals are untouched, 2021 and 2022 half points included. YC Windex has one season
  * with totals, so it is the league the >= 2 seasons rule disables.
+ *
+ * fixture.windexcup2025 is the real 2024-12-01..2025-11-30 Windex Cup season, FINISHED,
+ * under the same placeholder ids: its standings as get-standings returns them and every
+ * score. The other two season blocks were in progress on 2026-08-11, which is why a
+ * Season axis stretched to today on every finished season went uncaught (V-axis).
  */
 const fs = require('fs');
 const path = require('path');
@@ -1712,7 +1718,7 @@ function vPillsC() {
     const seasonIds = M.activeLinesOf(c.season).map((l) => l.id);
     const careerIds = M.activeLinesOf(c.data).map((l) => l.id);
     const models = ['season', 'd10', 'd4', 'career'].map((requested) =>
-      M.historyModel({ season: c.season, careerRows: c.a.rows, spans: c.spans, standings: c.f.standings, seasonId: c.seasonId, todayIso: TODAY, requested }),
+      M.historyModel({ season: c.season, careerRows: c.a.rows, spans: c.spans, standings: c.f.standings, seasonId: c.seasonId, seasonEnd: c.a.seasons.find((sp) => sp.id === c.seasonId).end_date, todayIso: TODAY, requested }),
     );
     const pills = models[0].pills.map((p) => p.id);
     const oneSet = new Set(models.map((m) => m.pills.map((p) => p.id).join())).size === 1;
@@ -1774,7 +1780,7 @@ function vReach() {
     const day = next.start_date;
     const season = M.buildChartData([], f.standings, day, day);
     const spans = M.careerSpans(a.seasons, day);
-    const m = M.historyModel({ season, careerRows: a.rows, spans, standings: f.standings, seasonId: next.id, todayIso: day, requested: 'season' });
+    const m = M.historyModel({ season, careerRows: a.rows, spans, standings: f.standings, seasonId: next.id, seasonEnd: next.end_date, todayIso: day, requested: 'season' });
     const opt = Object.fromEntries(m.options.map((o) => [o.key, o]));
     const played = new Set(a.rows.filter((r) => r.rounds_played > 0 && spans.some((sp) => sp.id === r.season_id)).map((r) => r.season_id)).size;
     const problems = [];
@@ -1799,7 +1805,7 @@ function vReach() {
       careerRows: ya.rows,
       spans: M.careerSpans(ya.seasons, next.start_date),
       standings: y.standings,
-      seasonId: next.id,
+      seasonId: next.id, seasonEnd: next.end_date,
       todayIso: next.start_date,
       requested: 'career',
     });
@@ -1814,7 +1820,7 @@ function vReach() {
     for (const key of FIXTURES) {
       const c = careerCase(key);
       for (const requested of ['season', 'd10', 'd4', 'career']) {
-        const m = M.historyModel({ season: c.season, careerRows: c.a.rows, spans: c.spans, standings: c.f.standings, seasonId: c.seasonId, todayIso: TODAY, requested });
+        const m = M.historyModel({ season: c.season, careerRows: c.a.rows, spans: c.spans, standings: c.f.standings, seasonId: c.seasonId, seasonEnd: c.a.seasons.find((sp) => sp.id === c.seasonId).end_date, todayIso: TODAY, requested });
         const opt = Object.fromEntries(m.options.map((o) => [o.key, o]));
         const old = { season: true };
         for (const rk of WINDOWS) old[rk] = M.rangeHasRounds(c.season.dates, M.windowStartOf(TODAY, M.RANGE_DAYS[rk]), TODAY);
@@ -1840,6 +1846,90 @@ function vReach() {
   );
   if (before.some((p) => p.startsWith('"No history data." gated on'))) ok('V-reach arm', `HistoryChart@${PRE_REACH_COMMIT}, which hid the chart without Season lines, fails the same parse (${before.length} problems)`);
   else bad('V-reach arm', `HistoryChart@${PRE_REACH_COMMIT} passes the gate parse — the check cannot see the bug: ${before.join('; ')}`);
+}
+
+/* ── V-axis ── A finished season's Season chart covers exactly that season ─────
+ * x=1 was today for every season, so a finished season stretched from its start to
+ * today. It survived because every fixture season was in progress, and because V12
+ * holds Season output byte-identical to a baseline: a check that asserts "unchanged"
+ * cannot catch "was always wrong". This builds fixture.windexcup2025 — the real 2025
+ * season, finished — the way the component builds it.
+ */
+const PRE_AXIS_COMMIT = '5aaa440';
+
+function vAxis() {
+  const f = fixture.windexcup2025;
+  const end = M.seasonAxisEnd(f.seasonEnd, TODAY);
+  const data = M.buildChartData(f.scores, f.standings, f.seasonStart, end);
+  const toX = M.makeToX(f.seasonStart, end);
+  const ticks = M.buildMonthTicks(f.seasonStart, end, toX);
+  const lines = M.activeLinesOf(data);
+  const problems = [];
+  if (end !== f.seasonEnd) problems.push(`axis ends ${end}, want the season's last day ${f.seasonEnd}`);
+  if (toX(f.seasonStart) !== 0 || toX(f.seasonEnd) !== 1) problems.push(`first day at x=${toX(f.seasonStart)}, last day at x=${toX(f.seasonEnd)}`);
+  const start = new Date(M.dayMs(f.seasonStart));
+  const last = new Date(M.dayMs(end));
+  const months = (last.getFullYear() - start.getFullYear()) * 12 + (last.getMonth() - start.getMonth()) + 1;
+  if (months !== 12) problems.push(`axis spans ${months} calendar months`);
+  if (ticks.length !== 11 || ticks.map((t) => t.label).join('') !== 'JFMAMJJASON') problems.push(`${ticks.length} month ticks: ${ticks.map((t) => t.label).join('')}`);
+  if (!ticks.every((t) => t.nx > 0 && t.nx < 1)) problems.push('a month tick sits outside the season');
+  const lastVertexX = Math.max(...lines.map((l) => l.points[l.points.length - 1].x));
+  if (lines.length !== f.standings.length || lastVertexX !== 1 || lines.some((l) => l.points.some((p) => p.x < 0 || p.x > 1))) problems.push(`${lines.length} lines, rightmost vertex x=${lastVertexX}`);
+  if (problems.length === 0) ok('V-axis finished season', `${f.seasonStart}..${f.seasonEnd}: axis ends on its last day (x=1), 12 calendar months, 11 month ticks ${ticks.map((t) => t.label).join('')}; ${lines.length} lines reach x=1 on the final round`);
+  else bad('V-axis finished season', problems.join('; '));
+
+  // Arm: the old mapping, start -> today, must fail the same assertions.
+  const oldToX = M.makeToX(f.seasonStart, TODAY);
+  const oldTicks = M.buildMonthTicks(f.seasonStart, TODAY, oldToX);
+  if (oldToX(f.seasonEnd) < 1 && oldTicks.length !== 11) ok('V-axis arm', `start -> today puts the last day at x=${oldToX(f.seasonEnd).toFixed(3)} with ${oldTicks.length} month ticks`);
+  else bad('V-axis arm', `the old mapping passes: last day x=${oldToX(f.seasonEnd)}, ${oldTicks.length} ticks`);
+
+  // The season in progress, and the day boundary, are unchanged.
+  const current = fixture.alltime.windexcup.seasons.find((sp) => sp.start_date === fixture.windexcup.seasonStart);
+  const yesterday = M.windowStartOf(TODAY, 1);
+  if (M.seasonAxisEnd(current.end_date, TODAY) === TODAY && M.seasonAxisEnd(TODAY, TODAY) === TODAY && M.seasonAxisEnd(yesterday, TODAY) === yesterday) {
+    ok('V-axis in progress', `season ending ${current.end_date}: axis still ends today; ending today: today; ended yesterday: yesterday`);
+  } else {
+    bad('V-axis in progress', `${M.seasonAxisEnd(current.end_date, TODAY)} / ${M.seasonAxisEnd(TODAY, TODAY)} / ${M.seasonAxisEnd(yesterday, TODAY)}`);
+  }
+
+  // Windows on a finished season are off. Days after the 2025 season ended, its last
+  // 10 days still hold rounds — but a window's entry is read off the Season line at
+  // today's mapping, which a finished season no longer has, so it would start wrong.
+  {
+    const day = M.windowStartOf(f.seasonEnd, -3);
+    const seasonData = M.buildChartData(f.scores, f.standings, f.seasonStart, M.seasonAxisEnd(f.seasonEnd, day));
+    const m = M.historyModel({ season: seasonData, careerRows: null, spans: [], standings: f.standings, seasonId: 'wc-2025', seasonEnd: f.seasonEnd, todayIso: day, requested: 'd10' });
+    const opt = Object.fromEntries(m.options.map((o) => [o.key, o]));
+    const hasRounds = M.rangeHasRounds(seasonData.dates, M.windowStartOf(day, 10), day);
+    const ws = M.windowStartOf(day, 10);
+    const w = M.windowChartData(seasonData, f.seasonStart, ws, day);
+    const trueEntry = (l) => M.valueAt(l.points, M.makeToX(f.seasonStart, f.seasonEnd)(ws));
+    const wrong = w.lines.filter((l, i) => l.points.length && Math.abs(l.points[0].y - trueEntry(seasonData.lines[i])) > 1e-6).length;
+    if (opt.d10.disabled && opt.d4.disabled && !opt.season.disabled && m.range === 'season' && hasRounds && wrong > 0) {
+      ok('V-axis windows', `${day}, 3 days after the season: 10 days and 4 days off, asked for 10 days draws Season; the window holds rounds, and built anyway ${wrong} of ${w.lines.length} lines would start at the wrong value`);
+    } else {
+      bad('V-axis windows', `d10 disabled=${opt.d10.disabled} d4 disabled=${opt.d4.disabled} range=${m.range} hasRounds=${hasRounds} wrongEntries=${wrong}`);
+    }
+  }
+
+  // Static half: the component builds the Season chart on seasonAxisEnd. Arm: the
+  // component before this fix fails.
+  const axisProblems = (text) => {
+    const out = [];
+    if (!/seasonAxisEnd\(seasonEndDate, todayIso\)/.test(text)) out.push('never calls seasonAxisEnd(seasonEndDate, todayIso)');
+    for (const old of ['buildChartData(scores, standings, seasonStartDate, todayIso)', 'makeToX(seasonStartDate, todayIso)', 'buildMonthTicks(seasonStartDate, todayIso']) {
+      if (text.includes(old)) out.push(`still ${old}`);
+    }
+    if (!/historyModel\(\{[^}]*seasonEnd: seasonEndDate/.test(text)) out.push('historyModel is not told the season end');
+    return out;
+  };
+  const now = axisProblems(fs.readFileSync(COMPONENT, 'utf8'));
+  const pre = axisProblems(execFileSync('git', ['show', `${PRE_AXIS_COMMIT}:windex-expo/components/HistoryChart.tsx`], { cwd: EXPO, encoding: 'utf8', stdio: 'pipe' }));
+  if (now.length === 0) ok('V-axis component', 'HistoryChart builds Season data, x mapping and month ticks on seasonAxisEnd, and gives historyModel the season end');
+  else bad('V-axis component', now.join('; '));
+  if (pre.length > 0) ok('V-axis component arm', `HistoryChart@${PRE_AXIS_COMMIT} fails the same parse (${pre.length} problems)`);
+  else bad('V-axis component arm', `HistoryChart@${PRE_AXIS_COMMIT} passes — the parse cannot see the bug`);
 }
 
 /* ── Run ───────────────────────────────────────────────────────────────────── */
@@ -1893,6 +1983,8 @@ console.log('\n=== V-pills-c  one pill set in every range ===');
 run('V-pills-c', vPillsC);
 console.log('\n=== V-reach  All time reachable with no Season lines ===');
 run('V-reach', vReach);
+console.log('\n=== V-axis  a finished season covers exactly that season ===');
+run('V-axis', vAxis);
 console.log(`\n=== V12  Season unchanged vs ${BASELINE_COMMIT} ===`);
 run('V12', v12);
 console.log(`\n=== V14  Standings toggle identical to ${BASELINE_COMMIT} (static) ===`);

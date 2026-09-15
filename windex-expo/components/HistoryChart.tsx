@@ -36,6 +36,7 @@ import {
   nearestDate,
   niceTickValues,
   polylinePoints,
+  seasonAxisEnd,
   windowChartData,
   windowStartOf,
   type CareerRow,
@@ -148,6 +149,8 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   const [cursorY, setCursorY] = useState<number | null>(null);
 
   const todayIso = useMemo(() => isoOf(new Date()), []);
+  // Where the Season chart's x=1 sits: today, or the season's last day once it has ended.
+  const seasonAxis = seasonAxisEnd(seasonEndDate, todayIso);
 
   // All time's seasons: started by the chart's own local date, in start_date order.
   const spans = useMemo(() => careerSpans(seasons, todayIso), [seasons, todayIso]);
@@ -166,7 +169,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     ])
       .then(([scores, rows]) => {
         if (cancelled) return;
-        const next = buildChartData(scores, standings, seasonStartDate, todayIso);
+        const next = buildChartData(scores, standings, seasonStartDate, seasonAxis);
         setChartState(next);
         setCareerRows(rows);
         setSelected([]);
@@ -177,7 +180,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
         // batch, by the same rule the render uses, so a range off offer is never drawn.
         // Data only changes here and todayIso is fixed at mount.
         setRange(
-          (prev) => historyModel({ season: next, careerRows: rows, spans, standings, seasonId, todayIso, requested: prev }).range ?? 'season',
+          (prev) => historyModel({ season: next, careerRows: rows, spans, standings, seasonId, seasonEnd: seasonEndDate, todayIso, requested: prev }).range ?? 'season',
         );
       })
       .catch(() => {
@@ -189,14 +192,14 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     return () => {
       cancelled = true;
     };
-  }, [seasonId, groupId, standings, seasonStartDate, seasonEndDate, todayIso, spans]);
+  }, [seasonId, groupId, standings, seasonStartDate, seasonEndDate, seasonAxis, todayIso, spans]);
 
   // Every decision before drawing — the ranges on offer, the range to draw, the pills,
   // and whether there is anything to show at all — comes from historyModel, so
   // verify.js checks the decisions this renders (V-reach).
   const model = useMemo(
-    () => (chartState ? historyModel({ season: chartState, careerRows, spans, standings, seasonId, todayIso, requested: range }) : null),
-    [chartState, careerRows, spans, standings, seasonId, todayIso, range],
+    () => (chartState ? historyModel({ season: chartState, careerRows, spans, standings, seasonId, seasonEnd: seasonEndDate, todayIso, requested: range }) : null),
+    [chartState, careerRows, spans, standings, seasonId, seasonEndDate, todayIso, range],
   );
 
   // Everything the PLOT draws from, for the range on screen. Pills and hues do not
@@ -205,21 +208,22 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   const view = useMemo((): RangeView | null => {
     if (!chartState || !model || model.range === null) return null;
     if (model.range === 'season') {
-      const toX = makeToX(seasonStartDate, todayIso);
-      return { data: chartState, toX, ticks: buildMonthTicks(seasonStartDate, todayIso, toX), dates: chartState.dates };
+      const toX = makeToX(seasonStartDate, seasonAxis);
+      return { data: chartState, toX, ticks: buildMonthTicks(seasonStartDate, seasonAxis, toX), dates: chartState.dates };
     }
     if (model.range === 'career') {
       if (!model.career) return null;
       const toX = careerToX(model.career.spans);
       return { data: model.career, toX, ticks: buildCareerTicks(model.career.spans, toX), dates: model.career.dates };
     }
+    // Windows are only on offer for the season in progress, where seasonAxis is today.
     const days = RANGE_DAYS[model.range];
     const windowStart = windowStartOf(todayIso, days);
     const data = windowChartData(chartState, seasonStartDate, windowStart, todayIso);
     // One toX for the window's vertices AND its day ticks.
     const toX = makeToX(windowStart, todayIso);
     return { data, toX, ticks: buildDayTicks(todayIso, days, toX), dates: data.dates };
-  }, [chartState, model, seasonStartDate, todayIso]);
+  }, [chartState, model, seasonStartDate, seasonAxis, todayIso]);
 
   const onLayout = (e: LayoutChangeEvent) => setSvgWidth(e.nativeEvent.layout.width);
 
