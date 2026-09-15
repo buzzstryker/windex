@@ -24,20 +24,24 @@ import {
   buildDayTicks,
   buildMonthTicks,
   buildTooltipRows,
+  buildWindowTooltipRows,
   careerHeaderAt,
   careerSpans,
   careerToX,
   formatDay,
   formatFull,
+  formatSigned,
   historyModel,
   isoOf,
   makeScales,
   makeToX,
   nearestDate,
   niceTickValues,
+  playedInWindow,
   polylinePoints,
   seasonAxisEnd,
   windowChartData,
+  windowHeader,
   windowStartOf,
   type CareerRow,
   type ChartData,
@@ -69,6 +73,13 @@ const TOOLTIP_W = 168;
 const TOOLTIP_PAD = 8;
 const TOOLTIP_HEADER_H = 20;
 const TOOLTIP_ROW_H = 17;
+
+/** 10 days / 4 days. Both are open at the device check. A resting player lies under the
+ *  baseline, so only RESTING_STROKE - BASELINE_STROKE of it shows, split either side:
+ *  if that soft edge reads as a glitch rather than as players resting, 1.5 merges it
+ *  into the baseline. If the baseline reads too light in light mode, 1.25. */
+const RESTING_STROKE = 2.5;
+const BASELINE_STROKE = 1;
 
 async function fetchSeasonScores(seasonId: string, groupId: string): Promise<ScoreRow[]> {
   const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
@@ -218,10 +229,10 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     }
     // Windows are only on offer for the season in progress, where seasonAxis is today.
     const days = RANGE_DAYS[model.range];
-    const windowStart = windowStartOf(todayIso, days);
-    const data = windowChartData(chartState, seasonStartDate, windowStart, todayIso);
+    const start = windowStartOf(todayIso, days);
+    const data = windowChartData(chartState, start, todayIso);
     // One toX for the window's vertices AND its day ticks.
-    const toX = makeToX(windowStart, todayIso);
+    const toX = makeToX(start, todayIso);
     return { data, toX, ticks: buildDayTicks(todayIso, days, toX), dates: data.dates };
   }, [chartState, model, seasonStartDate, seasonAxis, todayIso]);
 
@@ -244,6 +255,15 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   const s = makeScales(svgWidth, yMin, yMax);
   const xTicks = view.ticks;
   const yTicks = niceTickValues(yMin, yMax, 6);
+
+  // 10 days and 4 days show the change since windowStart. A player who did not play in
+  // the window sits flat on 0: drawn extra-dim, under the baseline, and left out of the
+  // automatic tooltip rows.
+  const windowStart = model.range === 'd10' || model.range === 'd4' ? windowStartOf(todayIso, RANGE_DAYS[model.range]) : null;
+  const resting = new Set<string>();
+  if (windowStart !== null) {
+    for (const l of plottedLines) if (!playedInWindow(l, windowStart, todayIso)) resting.add(l.id);
+  }
 
   const allIds = model.pills.map((p) => p.id);
   const hues = assignHues(allIds, selected);
@@ -295,7 +315,9 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
     const career = model.range === 'career' ? model.career : null;
     const rows = career
       ? buildCareerTooltipRows(career, activeDate, selected, cy, s)
-      : buildTooltipRows(plottedLines, nx, selected, cy, s);
+      : windowStart !== null
+        ? buildWindowTooltipRows(view.data, windowStart, todayIso, nx, selected, cy, s)
+        : buildTooltipRows(plottedLines, nx, selected, cy, s);
     if (rows.length > 0) {
       const height = TOOLTIP_PAD * 2 + TOOLTIP_HEADER_H + rows.length * TOOLTIP_ROW_H;
       const cx = s.toSvgX(nx);
@@ -310,7 +332,13 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
         : PAD_T + s.plotH / 2;
       const top = Math.max(PAD_T, Math.min(meanY - height / 2, CHART_H - PAD_B - height));
 
-      tooltip = { header: career ? careerHeaderAt(career, activeDate) : formatFull(activeDate), rows, left, top, height, cx };
+      // A bare date over a window's values would read as season totals.
+      const header = career
+        ? careerHeaderAt(career, activeDate)
+        : windowStart !== null
+          ? windowHeader(windowStart, activeDate)
+          : formatFull(activeDate);
+      tooltip = { header, rows, left, top, height, cx };
     }
   }
 
@@ -461,7 +489,8 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
               ) : null,
             )}
 
-            {yMin < 0 && yMax > 0 && (
+            {/* Season and All time: the zero line is chrome — dashed, under every line. */}
+            {windowStart === null && yMin < 0 && yMax > 0 && (
               <SvgLine
                 x1={PAD_L}
                 y1={s.toSvgY(0)}
@@ -473,11 +502,40 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
               />
             )}
 
+            {/* A window's players who did not play sit flat on 0, extra-dim, and are
+                emitted BEFORE the baseline so it draws over them instead of vanishing
+                under them. A selected one is not here: selection always wins. */}
+            {plottedLines
+              .filter((l) => resting.has(l.id) && !selected.includes(l.id))
+              .map((line) => (
+                <Polyline
+                  key={`rest-${line.id}`}
+                  points={polylinePoints(line, s)}
+                  fill="none"
+                  stroke={c.chartInactive}
+                  strokeWidth={RESTING_STROKE}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              ))}
+            {/* In a window 0 is where every line started — above it is up over the
+                window, below is down — so the zero line is the baseline: solid. */}
+            {windowStart !== null && (
+              <SvgLine
+                x1={PAD_L}
+                y1={s.toSvgY(0)}
+                x2={svgWidth - PAD_R}
+                y2={s.toSvgY(0)}
+                stroke={c.chartZero}
+                strokeWidth={BASELINE_STROKE}
+              />
+            )}
+
             {/* Two passes, not a sort and not an opacity trick: SVG paints in
                 document order, so the dimmed field must be emitted first and the
                 highlighted lines second to land on top of it. */}
             {plottedLines
-              .filter((l) => !selected.includes(l.id))
+              .filter((l) => !selected.includes(l.id) && !resting.has(l.id))
               .map((line) => (
                 <Polyline
                   key={`dim-${line.id}`}
@@ -571,7 +629,9 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
                     {Math.round(r.value)} · last {formatDay(r.lastDate!)}
                   </Text>
                 ) : (
-                  <Text style={[styles.tooltipValue, { color: c.text }]}>{Math.round(r.value)}</Text>
+                  <Text style={[styles.tooltipValue, { color: c.text }]}>
+                    {windowStart !== null ? formatSigned(r.value) : Math.round(r.value)}
+                  </Text>
                 )}
               </View>
             ))}

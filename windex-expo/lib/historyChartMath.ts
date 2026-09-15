@@ -157,22 +157,12 @@ export function makeToX(start: string, todayIso: string): (date: string) => numb
 
 /* ── Scales ────────────────────────────────────────────────────────────────── */
 
+/** No clamping: every range's y-domain covers every line it draws. (The cropped
+ *  windows once parked players outside theirs and pinned them to the floor or
+ *  ceiling; the rebased windows put every line through 0.) */
 export type Scales = {
   toSvgX: (nx: number) => number;
   toSvgY: (val: number) => number;
-  /**
-   * toSvgY clamped to the plot rect. Everything drawn from a series value goes
-   * through this — polylines and crosshair dots — while gridlines keep toSvgY.
-   *
-   * A windowed y-domain covers only the players who played in the window, so a
-   * player parked far outside it must pin to the floor or ceiling. Coordinate
-   * clamping, NOT <ClipPath>: clipping to the plot rect deletes a line lying wholly
-   * outside it, which is the opposite of pinning. Clamping vertices would bend any
-   * segment that crosses the boundary, but none can: every line able to leave a
-   * windowed domain is wholly horizontal (see windowChartData). In Season the
-   * domain covers every line and this is the identity.
-   */
-  plotY: (val: number) => number;
   plotW: number;
   plotH: number;
 };
@@ -181,13 +171,11 @@ export function makeScales(svgWidth: number, yMin: number, yMax: number): Scales
   const plotW = Math.max(1, svgWidth - PAD_L - PAD_R);
   const plotH = CHART_H - PAD_T - PAD_B;
   const span = yMax - yMin || 1;
-  const toSvgY = (val: number) => PAD_T + (1 - (val - yMin) / span) * plotH;
   return {
     plotW,
     plotH,
     toSvgX: (nx: number) => PAD_L + nx * plotW,
-    toSvgY,
-    plotY: (val: number) => Math.min(PAD_T + plotH, Math.max(PAD_T, toSvgY(val))),
+    toSvgY: (val: number) => PAD_T + (1 - (val - yMin) / span) * plotH,
   };
 }
 
@@ -283,79 +271,98 @@ export function rangeHasRounds(dates: string[], windowStart: string, todayIso: s
 }
 
 /**
- * The season chart CROPPED to (windowStart, today]. Not rebased: every value is
- * still cumulative season points, so a date reads the same number in Season and
- * in any window.
+ * The season chart REBASED to (windowStart, today]: every value is the change since the
+ * close of windowStart, and every line starts at 0. Season and All time stay cumulative.
  *
- *   x=0  windowStart, carrying the standings after that day's rounds
+ *   x=0  windowStart; every line at 0
  *   x=1  today
  *
  * Per line:
- *   entry   the Season line's own value at the window edge — interpolated where
- *           Season draws a diagonal, because that IS the pixel Season shows there.
- *           A line that ended before the window holds its last value.
- *   body    the Season vertices inside the window, re-mapped. slice(1) skips the
+ *   origin  the player's cumulative season total through the close of windowStart: the
+ *           y of their last Season vertex dated on or before it, else 0. NOT the Season
+ *           line's interpolated value at the edge. As a crop that value was right — it
+ *           was the pixel Season draws there. As an origin it counts part of a player's
+ *           first in-window round as before the window wherever a Season diagonal
+ *           crosses the edge, which is most players: p019 won 138 in Windex Cup's last
+ *           10 days and would have read +88 (V13).
+ *   body    the Season vertices inside the window, minus the origin. slice(1) skips the
  *           season-start vertex, which is not a round.
- *   hold    a flat vertex at x=1. A player who stopped playing held their place,
- *           and that is information, so no line ENDS inside a window — the
- *           "ended · last X" tooltip row belongs to Season.
+ *   hold    a flat vertex at x=1. No line ENDS inside a window — the "ended · last X"
+ *           tooltip row belongs to Season.
  *
- * No vertex but the entry sits at x=0 (body dates are > windowStart), so no line
- * draws a vertical stroke up the left edge — which is exactly what swapping in a
- * windowed toX over Season points would do, because makeToX clamps.
+ * Before a player's first in-window round their line rises from 0 at the edge, where
+ * Season draws its own diagonal: the stretch where nothing happened does not borrow
+ * movement from before it. From that round on, the window is Season shifted by the
+ * origin.
  *
- * y-domain: over the players with a score row IN the window, seeded from their
- * points, never from zero. Every other line has no in-window vertex, so it is
- * [entry, hold] at one y: wholly horizontal, which is what makes clamping it to the
- * floor or ceiling exact (see Scales.plotY).
+ * A player with no score row in the window is flat at 0 (see playedInWindow). Every line
+ * passes through 0, so the domain covers every line and no line can leave it.
  *
  * Takes no selection, like buildChartData: RANGE moves the axis, SELECTION never does.
  */
-export function windowChartData(
-  data: ChartData,
-  seasonStart: string,
-  windowStart: string,
-  todayIso: string,
-): ChartData {
-  const seasonToX = makeToX(seasonStart, todayIso);
+export function windowChartData(data: ChartData, windowStart: string, todayIso: string): ChartData {
   const toX = makeToX(windowStart, todayIso);
   const inWindow = (d: string) => d > windowStart && d <= todayIso;
-  const entryNx = seasonToX(windowStart);
 
+  let lo = 0;
+  let hi = 0;
   const lines = data.lines.map((line): PlayerLine => {
     if (line.points.length === 0) return line;
-    const entry = valueAt(line.points, entryNx) ?? line.points[line.points.length - 1].y;
-    const points: LinePoint[] = [{ x: 0, y: entry, date: windowStart }];
+    let origin = 0;
+    for (const p of line.points.slice(1)) if (p.date <= windowStart) origin = p.y;
+    const points: LinePoint[] = [{ x: 0, y: 0, date: windowStart }];
     for (const p of line.points.slice(1)) {
-      if (inWindow(p.date)) points.push({ x: toX(p.date), y: p.y, date: p.date });
+      if (inWindow(p.date)) points.push({ x: toX(p.date), y: p.y - origin, date: p.date });
     }
     const last = points[points.length - 1];
     if (last.x < 1) points.push({ x: 1, y: last.y, date: todayIso });
-    return { ...line, points };
-  });
-
-  const source = lines.filter((l) => l.points.length > 0 && l.playedDates.some(inWindow));
-  // Unreachable through buildChartData: an enabled range has a scored date in the
-  // window, and that same score row puts its player in `source`. A hand-built
-  // ChartData can still get here, and an empty source must not yield ±Infinity.
-  const over = source.length > 0 ? source : lines;
-
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const l of over) {
-    for (const p of l.points) {
+    for (const p of points) {
       if (p.y < lo) lo = p.y;
       if (p.y > hi) hi = p.y;
     }
-  }
-  if (lo > hi) {
-    lo = 0;
-    hi = 0;
-  }
+    return { ...line, points };
+  });
+
   lo = Math.floor(lo);
   hi = Math.ceil(hi);
   const pad = Math.max(10, Math.round((hi - lo) * 0.1));
   return { lines, yMin: lo - pad, yMax: hi + pad, dates: data.dates.filter(inWindow) };
+}
+
+/** Whether a player has a score row in (windowStart, today] — zero-point rounds count.
+ *  One who has not is flat at 0 in a window: drawn extra-dim under the baseline, and
+ *  left out of the automatic nearest-5. */
+export function playedInWindow(line: PlayerLine, windowStart: string, todayIso: string): boolean {
+  return line.playedDates.some((d) => d > windowStart && d <= todayIso);
+}
+
+/** Tooltip rows for a rebased window: buildTooltipRows over the players who played in it
+ *  and any selected player who did not. With no selection the nearest-5 comes from
+ *  movers only; near the baseline it would otherwise be five players sitting at 0. */
+export function buildWindowTooltipRows(
+  data: ChartData,
+  windowStart: string,
+  todayIso: string,
+  nx: number,
+  selectedIds: string[],
+  cursorSvgY: number,
+  s: Scales,
+): TooltipRow[] {
+  const lines = activeLinesOf(data).filter((l) => selectedIds.includes(l.id) || playedInWindow(l, windowStart, todayIso));
+  return buildTooltipRows(lines, nx, selectedIds, cursorSvgY, s);
+}
+
+/** Tooltip header for a rebased window: "Change, 1 Aug → 8 Aug". A bare date would read
+ *  as a season total. The first date is the origin: the close of windowStart. */
+export function windowHeader(windowStart: string, date: string): string {
+  return `Change, ${formatDay(windowStart)} → ${formatDay(date)}`;
+}
+
+/** A change, signed: "+138", "-57", "0". Rounded like every other chart value, and never
+ *  "-0". A hyphen-minus, matching the leaderboard's "-$". */
+export function formatSigned(v: number): string {
+  const n = Math.round(v);
+  return n > 0 ? `+${n}` : n < 0 ? `-${-n}` : '0';
 }
 
 /* ── Value lookup ──────────────────────────────────────────────────────────── */
@@ -396,7 +403,7 @@ export function valueAt(points: LinePoint[], nx: number): number | null {
  *  verification script reads the very string the SVG renders, rather than a
  *  reimplementation of it. */
 export function polylinePoints(line: PlayerLine, s: Scales): string {
-  return line.points.map((p) => `${s.toSvgX(p.x)},${s.plotY(p.y)}`).join(' ');
+  return line.points.map((p) => `${s.toSvgX(p.x)},${s.toSvgY(p.y)}`).join(' ');
 }
 
 /* ── Snapping ──────────────────────────────────────────────────────────────── */
@@ -585,10 +592,6 @@ export function isNearestCandidate(line: PlayerLine, nx: number): boolean {
  * plus the crosshair dots is the ONLY thing making five gray rows interpretable.
  * V9 asserts the ordering; do not "tidy" it into alphabetical.
  *
- * Equal svgY breaks by value, highest first: several players parked on a windowed
- * floor share one pixel row, and their true values still have a top-to-bottom
- * order. (In Season equal svgY means equal value, so this never reorders anything.)
- *
  * Ended rows carry no y, so they sort after the positioned ones, by value.
  */
 export function buildTooltipRows(
@@ -601,7 +604,7 @@ export function buildTooltipRows(
   const mk = (line: PlayerLine): TooltipRow | null => {
     const v = valueAt(line.points, nx);
     if (v !== null) {
-      return { id: line.id, name: line.name, value: v, ended: false, svgY: s.plotY(v) };
+      return { id: line.id, name: line.name, value: v, ended: false, svgY: s.toSvgY(v) };
     }
     const last = line.points[line.points.length - 1];
     if (!last) return null;
@@ -629,7 +632,7 @@ export function buildTooltipRows(
 
   const positioned = rows
     .filter((r) => !r.ended)
-    .sort((a, b) => (a.svgY ?? 0) - (b.svgY ?? 0) || b.value - a.value);
+    .sort((a, b) => (a.svgY ?? 0) - (b.svgY ?? 0));
   const ended = rows.filter((r) => r.ended).sort((a, b) => b.value - a.value);
   return [...positioned, ...ended];
 }

@@ -39,6 +39,11 @@ export const Colors = {
      *  to a dark knot at every crossing, and on a cumulative-points chart they
      *  cross constantly, right where the eye goes. */
     chartDim: '#C4C4CA',
+    /** A player who did not play in a 10-day or 4-day window: flat at 0, under the
+     *  baseline. Dimmer than chartDim so the players who moved stand out. OKLab
+     *  lightness midway between `border` and chartDim, ΔE >= 4 from each — no
+     *  value can be far from both, they are only 8.5 apart (V-dim). */
+    chartInactive: '#D2D2D7',
   },
   dark: {
     text: '#ECEDEE',
@@ -60,6 +65,7 @@ export const Colors = {
     venmoBlue: '#4DA6FF',
     chartZero: '#5A5A60',
     chartDim: '#4E4E55',
+    chartInactive: '#3F3F45',
   },
 };
 

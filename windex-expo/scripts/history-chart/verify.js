@@ -4,7 +4,8 @@
  *   node scripts/history-chart/verify.js        (from windex-expo/)
  *
  *   Season   V1 V2 V3 V5 V7 V9 Hues
- *   Ranges   V1w V2w V3w V7w V9w V13 V-pills V-clamp
+ *   Ranges   V1w V2w V3w V7w V9w V13 V-pills   (10 days / 4 days: rebased to the window start)
+ *   Rebase   V-origin V-inactive V-header V-dim
  *   All time V-order V1c V2c V3c V7c V9c V13c V-pills-c V-reach
  *   Axis     V-axis  a finished season's Season chart covers exactly that season
  *   Pins     V12  Season output byte-identical to the pre-ranges commit
@@ -173,7 +174,7 @@ function windowCase(key, rk) {
     seasonStart: f.seasonStart,
     season,
     enabled,
-    data: enabled ? M.windowChartData(season, f.seasonStart, ws, TODAY) : null,
+    data: enabled ? M.windowChartData(season, ws, TODAY) : null,
     toX: M.makeToX(ws, TODAY),
     inWindow: (d) => d > ws && d <= TODAY,
   };
@@ -249,11 +250,9 @@ function v1(key) {
 /* ── V1w ── Interpolation matches the rendered pixel, EVERY pixel column ──────
  * In a window the snap dates are few, and carry-forward disagreed at only 5 / 1 / 0
  * of them — too weak a falsifier to trust. Sweeping every column is what makes the
- * windowed V1 able to fail. Path A goes through plotY, because clamped lines are
- * emitted clamped and path B reads the emitted string.
+ * windowed V1 able to fail.
  */
 function v1w() {
-  let clampedLines = 0;
   for (const c of enabledWindows('V1w')) {
     const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
     const lines = M.activeLinesOf(c.data);
@@ -262,7 +261,6 @@ function v1w() {
     let carryDis = 0;
     let gaps = 0;
     for (const line of lines) {
-      if (line.points.some((p) => p.y < c.data.yMin || p.y > c.data.yMax)) clampedLines++;
       const str = M.polylinePoints(line, s);
       for (let px = 0; px <= s.plotW; px++) {
         const nx = px / s.plotW;
@@ -273,10 +271,10 @@ function v1w() {
           gaps++;
           continue;
         }
-        worst = Math.max(worst, Math.abs(s.plotY(v) - B));
+        worst = Math.max(worst, Math.abs(s.toSvgY(v) - B));
         compared++;
         const cf = carryForward(line.points, nx);
-        if (cf !== null && Math.abs(s.plotY(cf) - B) > 0.5) carryDis++;
+        if (cf !== null && Math.abs(s.toSvgY(cf) - B) > 0.5) carryDis++;
       }
     }
     const name = `V1w ${c.key} ${c.rk}`;
@@ -285,8 +283,6 @@ function v1w() {
     if (carryDis > 0) ok(name + ' falsifier', `carry-forward disagrees at ${carryDis} columns (test discriminates)`);
     else bad(name + ' falsifier', 'carry-forward agreed at every column — V1w does not discriminate');
   }
-  if (clampedLines > 0) ok('V1w clamp coverage', `${clampedLines} clamped lines went through the pixel comparison`);
-  else bad('V1w clamp coverage', 'no line was clamped anywhere in the matrix — clamping not exercised');
 }
 
 /* ── V2 ── y-domain invariance under selection ─────────────────────────────── */
@@ -338,7 +334,7 @@ function v2w() {
       const domains = selections.map((sel) => {
         void M.assignHues(ids, sel);
         const s = M.makeScales(SVG_W, data.yMin, data.yMax);
-        return [data.yMin, data.yMax, s.toSvgY(0), s.plotY(100)].join('|');
+        return [data.yMin, data.yMax, s.toSvgY(0), s.toSvgY(100)].join('|');
       });
       if (domains.every((d) => d === domains[0])) {
         ok(`V2w selection ${key} ${rk}`, `domain [${data.yMin}, ${data.yMax}] identical across ${selections.length} selection states`);
@@ -360,31 +356,8 @@ function v2w() {
     }
   }
 
-  if (M.windowChartData.length === 4) ok('V2w signature', 'windowChartData takes no selection argument');
-  else bad('V2w signature', `windowChartData arity ${M.windowChartData.length}, expected 4`);
-
-  // Zero-seed arm. A league whose in-window field sits at 250-400: a data-seeded
-  // window axis must sit wholly above zero, while Season (from-zero lines) keeps 0.
-  const pts = [];
-  const ladder = [260, 300, 340, 380];
-  ladder.forEach((target, i) => {
-    pts.push(sc(`p${i}`, target - 20, '2026-06-01'));
-    pts.push(sc(`p${i}`, 20, '2026-08-09'));
-    pts.push(sc(`p${i}`, (i % 2 ? 1 : -1) * 7, '2026-08-10'));
-  });
-  const season = M.buildChartData(pts, people(4), '2026-01-01', TODAY);
-  const ws = M.windowStartOf(TODAY, 4);
-  const w = M.windowChartData(season, '2026-01-01', ws, TODAY);
-  // What a zero-seeded window would have produced, to prove this arm can fail.
-  let zlo = 0;
-  let zhi = 0;
-  for (const l of w.lines) for (const p of l.points) { zlo = Math.min(zlo, p.y); zhi = Math.max(zhi, p.y); }
-  const zeroSeededMin = zlo - Math.max(10, Math.round((zhi - zlo) * 0.1));
-  if (w.yMin > 0 && season.yMin <= 0 && zeroSeededMin <= 0) {
-    ok('V2w zero-seed', `window [${w.yMin}, ${w.yMax}] sits above 0; Season [${season.yMin}, ${season.yMax}] keeps it; a zero seed would give ${zeroSeededMin}`);
-  } else {
-    bad('V2w zero-seed', `window yMin ${w.yMin} (want > 0), Season yMin ${season.yMin} (want <= 0), zero-seeded ${zeroSeededMin} (want <= 0)`);
-  }
+  if (M.windowChartData.length === 3) ok('V2w signature', 'windowChartData takes no selection argument');
+  else bad('V2w signature', `windowChartData arity ${M.windowChartData.length}, expected 3`);
 }
 
 /* ── V3 ── Month ticks sit on the data's own mapping ───────────────────────── */
@@ -434,7 +407,7 @@ function dayTickProblems(today, days) {
   scores.push(sc('p1', 5, M.windowStartOf(today, days + 3)));
   const seasonStart = M.windowStartOf(today, 60);
   const season = M.buildChartData(scores, people(2), seasonStart, today);
-  const w = M.windowChartData(season, seasonStart, ws, today);
+  const w = M.windowChartData(season, ws, today);
   const line = w.lines.find((l) => l.id === 'p0');
 
   let drift = 0;
@@ -666,116 +639,87 @@ function v7w() {
   const start = '2026-01-01';
   const yesterday = M.windowStartOf(TODAY, 1);
 
-  // a. One round in the window.
+  // a. One round in the window: 0, the round, the hold.
   {
     const scores = [sc('p0', 10, '2026-05-01'), sc('p1', 30, '2026-05-01'), sc('p2', 50, '2026-05-01'),
       sc('p0', 10, '2026-06-01'), sc('p1', 5, '2026-06-01'), sc('p2', -5, '2026-06-01'),
       sc('p0', 4, yesterday), sc('p1', -3, yesterday), sc('p2', 2, yesterday)];
     const season = M.buildChartData(scores, people(3), start, TODAY);
-    const w = M.windowChartData(season, start, ws4, TODAY);
+    const w = M.windowChartData(season, ws4, TODAY);
     const lines = M.activeLinesOf(w);
     const s = M.makeScales(SVG_W, w.yMin, w.yMax);
-    const rows = M.buildTooltipRows(lines, M.makeToX(ws4, TODAY)(yesterday), [], M.PAD_T + 130, s);
-    if (w.dates.length === 1 && lines.every((l) => l.points.length === 3) && rows.length === 3 && finiteDomain(w)) {
-      ok('V7w one-round', 'entry + vertex + hold on every line, 1 snap date, tooltip has rows');
+    const rows = M.buildWindowTooltipRows(w, ws4, TODAY, M.makeToX(ws4, TODAY)(yesterday), [], M.PAD_T + 130, s);
+    const ys = lines.map((l) => l.points.map((p) => p.y).join('/')).join(' ');
+    if (w.dates.length === 1 && ys === '0/4/4 0/-3/-3 0/2/2' && rows.length === 3 && finiteDomain(w)) {
+      ok('V7w one-round', 'every line 0, its round (+4, -3, +2), the hold; 1 snap date; tooltip has rows');
     } else {
-      bad('V7w one-round', `dates=${w.dates.length} pts=${lines.map((l) => l.points.length)} rows=${rows.length}`);
+      bad('V7w one-round', `dates=${w.dates.length} lines ${ys} rows=${rows.length}`);
     }
   }
 
-  // b. Every line flat: the window's only rounds scored 0. Enabled (score rows
-  //    exist), and the players who played at 0 still define the axis.
+  // b. The window's only rounds scored 0: enabled, every line flat at 0 — and still
+  //    movers: they played, so normal dim and in the nearest-5.
   {
     const scores = [sc('p0', 5, '2026-05-01'), sc('p1', 5, '2026-05-01'), sc('p0', 0, yesterday), sc('p1', 0, yesterday)];
     const season = M.buildChartData(scores, people(2), start, TODAY);
     const enabled = M.rangeHasRounds(season.dates, ws4, TODAY);
-    const w = M.windowChartData(season, start, ws4, TODAY);
-    const allFlat = M.activeLinesOf(w).every((l) => new Set(l.points.map((p) => p.y)).size === 1);
-    if (enabled && allFlat && w.yMin === -5 && w.yMax === 15 && finiteDomain(w)) {
-      ok('V7w all-flat', 'enabled on zero-point rounds; domain [-5, 15] around the flat value, no NaN');
+    const w = M.windowChartData(season, ws4, TODAY);
+    const lines = M.activeLinesOf(w);
+    const allZero = lines.every((l) => l.points.every((p) => p.y === 0));
+    const played = lines.every((l) => M.playedInWindow(l, ws4, TODAY));
+    const s = M.makeScales(SVG_W, w.yMin, w.yMax);
+    const rows = M.buildWindowTooltipRows(w, ws4, TODAY, M.makeToX(ws4, TODAY)(yesterday), [], M.PAD_T + 130, s);
+    if (enabled && allZero && played && rows.length === 2 && w.yMin === -10 && w.yMax === 10 && finiteDomain(w)) {
+      ok('V7w zero-point rounds', 'enabled; every line flat at 0 but played, so not resting and in the nearest-5; domain [-10, 10]');
     } else {
-      bad('V7w all-flat', `enabled=${enabled} allFlat=${allFlat} domain [${w.yMin}, ${w.yMax}]`);
+      bad('V7w zero-point rounds', `enabled=${enabled} allZero=${allZero} played=${played} rows=${rows.length} domain [${w.yMin}, ${w.yMax}]`);
     }
   }
 
-  // c. Source set empty but the range enabled — unreachable through buildChartData,
-  //    so hand-built. Must fall back to all plotted lines, not ±Infinity.
+  // c. Nobody played in the window. The UI disables it; the math must still be sane.
   {
-    const hand = {
-      dates: [yesterday],
-      yMin: -99,
-      yMax: 99,
-      lines: [
-        { id: 'a', name: 'A', thin: false, playedDates: ['2026-05-01'], points: [{ x: 0, y: 0, date: start }, { x: 0.5, y: 40, date: '2026-05-01' }] },
-        { id: 'b', name: 'B', thin: false, playedDates: ['2026-05-01'], points: [{ x: 0, y: 0, date: start }, { x: 0.5, y: -20, date: '2026-05-01' }] },
-      ],
-    };
-    const w = M.windowChartData(hand, start, ws4, TODAY);
-    const none = M.windowChartData({ dates: [yesterday], yMin: 0, yMax: 0, lines: [] }, start, ws4, TODAY);
-    if (finiteDomain(w) && w.yMin <= -20 && w.yMax >= 40 && none.yMin === -10 && none.yMax === 10) {
-      ok('V7w empty-source', `falls back to all lines [${w.yMin}, ${w.yMax}]; no lines at all -> [-10, 10]`);
-    } else {
-      bad('V7w empty-source', `domain [${w.yMin}, ${w.yMax}], no-lines [${none.yMin}, ${none.yMax}]`);
-    }
-  }
-
-  // d. Played but scored 0. Synthetic, with an arm showing a vertex-based source
-  //    would have parked them; then the real case in the fixture.
-  {
-    const scores = [sc('p0', 500, '2026-05-01'), sc('p1', 10, '2026-05-01'), sc('p0', 0, yesterday), sc('p1', 8, yesterday)];
+    const scores = [sc('p0', 12, '2026-05-01'), sc('p1', -7, '2026-05-01')];
     const season = M.buildChartData(scores, people(2), start, TODAY);
-    const w = M.windowChartData(season, start, ws4, TODAY);
-    const p0 = w.lines.find((l) => l.id === 'p0');
-    const inside = p0.points.every((p) => p.y >= w.yMin && p.y <= w.yMax);
-    const vertexHi = Math.max(...w.lines.find((l) => l.id === 'p1').points.map((p) => p.y));
-    const vertexBasedWouldPark = 500 > vertexHi + Math.max(10, Math.round(vertexHi * 0.1));
-    if (inside && vertexBasedWouldPark) ok('V7w played-zero', 'a 0-point round keeps the player on-axis; a vertex-based source would have parked them');
-    else bad('V7w played-zero', `inside=${inside} vertexBasedWouldPark=${vertexBasedWouldPark}`);
-
-    let realCases = 0;
-    let realBad = 0;
-    for (const c of [windowCase('ycwindex', 'd10'), windowCase('windexcup', 'd10'), windowCase('windexcup', 'd4')]) {
-      if (!c.enabled) continue;
-      for (const l of M.activeLinesOf(c.data)) {
-        const played = l.playedDates.some(c.inWindow);
-        // Ask the SEASON line. The windowed line's hold vertex is dated today, which
-        // is inside the window, so it would pass for a round vertex on every line.
-        const seasonLine = c.season.lines.find((x) => x.id === l.id);
-        const hasVertex = seasonLine.points.slice(1).some((p) => c.inWindow(p.date));
-        if (played && !hasVertex) {
-          realCases++;
-          if (l.points.some((p) => p.y < c.data.yMin || p.y > c.data.yMax)) realBad++;
-        }
-      }
+    const enabled = M.rangeHasRounds(season.dates, ws4, TODAY);
+    const w = M.windowChartData(season, ws4, TODAY);
+    const lines = M.activeLinesOf(w);
+    const s = M.makeScales(SVG_W, w.yMin, w.yMax);
+    const nx = M.makeToX(ws4, TODAY)(yesterday);
+    const auto = M.buildWindowTooltipRows(w, ws4, TODAY, nx, [], M.PAD_T + 130, s);
+    const sel = M.buildWindowTooltipRows(w, ws4, TODAY, nx, ['p1'], M.PAD_T + 130, s);
+    const resting = lines.every((l) => !M.playedInWindow(l, ws4, TODAY) && l.points.every((p) => p.y === 0));
+    if (!enabled && lines.length === 2 && resting && w.yMin === -10 && w.yMax === 10 && auto.length === 0 && sel.length === 1 && sel[0].value === 0 && M.formatSigned(sel[0].value) === '0') {
+      ok('V7w nobody played', 'disabled in the UI; every line resting flat at 0, domain [-10, 10], no automatic rows, a selected player reads 0');
+    } else {
+      bad('V7w nobody played', `enabled=${enabled} resting=${resting} domain [${w.yMin}, ${w.yMax}] auto=${auto.length} sel=${JSON.stringify(sel)}`);
     }
-    if (realCases > 0 && realBad === 0) ok('V7w played-zero fixture', `${realCases} real played-but-no-vertex lines, all on-axis`);
-    else bad('V7w played-zero fixture', `${realCases} real cases, ${realBad} parked`);
   }
 
-  // e. Window opens before the season does.
+  // e. Window opens before the season does: nothing before it, so the origin is 0.
   {
     const seasonStart = M.windowStartOf(TODAY, 2);
     const scores = [sc('p0', 6, yesterday), sc('p1', -4, yesterday)];
     const season = M.buildChartData(scores, people(2), seasonStart, TODAY);
     const ws10 = M.windowStartOf(TODAY, 10);
-    const w = M.windowChartData(season, seasonStart, ws10, TODAY);
+    const w = M.windowChartData(season, ws10, TODAY);
     const lines = M.activeLinesOf(w);
     const entriesZero = lines.every((l) => l.points[0].x === 0 && l.points[0].y === 0);
     const noSeasonStartVertex = lines.every((l) => !l.points.some((p) => p.date === seasonStart));
-    if (entriesZero && noSeasonStartVertex && strokes(lines) === 0) ok('V7w before-season', 'entry 0, season-start vertex skipped, no strokes');
-    else bad('V7w before-season', `entriesZero=${entriesZero} noSeasonStartVertex=${noSeasonStartVertex} strokes=${strokes(lines)}`);
+    const ends = lines.map((l) => l.points[l.points.length - 1].y).join();
+    if (entriesZero && noSeasonStartVertex && strokes(lines) === 0 && ends === '6,-4') ok('V7w before-season', 'origin 0, season-start vertex skipped, no strokes, changes +6 / -4');
+    else bad('V7w before-season', `entriesZero=${entriesZero} noSeasonStartVertex=${noSeasonStartVertex} strokes=${strokes(lines)} ends ${ends}`);
   }
 
-  // f. A vertex exactly on windowStart becomes the entry value, not a snap date.
+  // f. A round exactly on windowStart is part of the origin, not the window.
   {
     const scores = [sc('p0', 3, '2026-05-01'), sc('p0', 7, ws4), sc('p0', 2, yesterday)];
     const season = M.buildChartData(scores, people(1), start, TODAY);
-    const w = M.windowChartData(season, start, ws4, TODAY);
+    const w = M.windowChartData(season, ws4, TODAY);
     const l = w.lines[0];
-    if (l.points[0].y === 10 && !w.dates.includes(ws4) && l.points.filter((p) => p.x === 0).length === 1) {
-      ok('V7w edge-vertex', `entry = ${l.points[0].y}, the standing after ${ws4}; not a snap date`);
+    if (l.points.map((p) => p.y).join() === '0,2,2' && !w.dates.includes(ws4) && l.points.filter((p) => p.x === 0).length === 1) {
+      ok('V7w edge-vertex', `the +7 on ${ws4} is in the origin (10): 0, +2, hold; ${ws4} is not a snap date`);
     } else {
-      bad('V7w edge-vertex', `entry ${l.points[0].y} dates ${w.dates} zeros ${l.points.filter((p) => p.x === 0).length}`);
+      bad('V7w edge-vertex', `points ${JSON.stringify(l.points)} dates ${w.dates}`);
     }
   }
 
@@ -787,19 +731,18 @@ function v7w() {
       sc('p2', 20, '2026-03-01'), sc('p2', 15, '2026-05-01'), sc('p2', -5, yesterday),
     ];
     const season = M.buildChartData(scores, people(3), start, TODAY);
-    const w = M.windowChartData(season, start, ws4, TODAY);
+    const w = M.windowChartData(season, ws4, TODAY);
     const lines = M.activeLinesOf(w);
     const p0 = lines.find((l) => l.id === 'p0');
-    const toX = M.makeToX(ws4, TODAY);
-    const nx = toX(yesterday);
+    const nx = M.makeToX(ws4, TODAY)(yesterday);
     const s = M.makeScales(SVG_W, w.yMin, w.yMax);
-    const auto = M.buildTooltipRows(lines, nx, [], s.plotY(p0.points[0].y), s);
-    const sel = M.buildTooltipRows(lines, nx, ['p0'], M.PAD_T, s);
-    const expectedEntry = M.valueAt(season.lines[0].points, M.makeToX(start, TODAY)(ws4));
-    if (p0 && p0.thin && p0.points[0].y === expectedEntry && expectedEntry > 0 && !auto.some((r) => r.id === 'p0') && sel.some((r) => r.id === 'p0')) {
-      ok('V7w thin-in-window', `drawn, entry ${expectedEntry.toFixed(2)} on its season diagonal, out of nearest-5, selectable`);
+    // The cursor sits right on p0's round, and p0 still stays out of the nearest-5.
+    const auto = M.buildWindowTooltipRows(w, ws4, TODAY, nx, [], s.toSvgY(40), s);
+    const sel = M.buildWindowTooltipRows(w, ws4, TODAY, nx, ['p0'], M.PAD_T, s);
+    if (p0 && p0.thin && p0.points.map((p) => p.y).join() === '0,40,40' && !auto.some((r) => r.id === 'p0') && sel.some((r) => r.id === 'p0')) {
+      ok('V7w thin-in-window', 'drawn 0, +40, hold; thin carried from Season, out of the nearest-5 with the cursor on it, selectable');
     } else {
-      bad('V7w thin-in-window', `thin=${p0 && p0.thin} entry=${p0 && p0.points[0].y} want ${expectedEntry} auto=${auto.map((r) => r.id)} sel=${sel.map((r) => r.id)}`);
+      bad('V7w thin-in-window', `thin=${p0 && p0.thin} points=${p0 && JSON.stringify(p0.points)} auto=${auto.map((r) => r.id)} sel=${sel.map((r) => r.id)}`);
     }
   }
 
@@ -807,9 +750,9 @@ function v7w() {
   {
     const scores = [sc('p0', 5, '2026-05-01'), sc('p0', 3, TODAY)];
     const season = M.buildChartData(scores, people(1), start, TODAY);
-    const l = M.windowChartData(season, start, ws4, TODAY).lines[0];
+    const l = M.windowChartData(season, ws4, TODAY).lines[0];
     const atOne = l.points.filter((p) => p.x === 1);
-    if (atOne.length === 1 && atOne[0].date === TODAY && atOne[0].y === 8) ok('V7w round-today', 'one vertex at x=1, the round itself');
+    if (atOne.length === 1 && atOne[0].date === TODAY && atOne[0].y === 3) ok('V7w round-today', 'one vertex at x=1, the round itself (+3)');
     else bad('V7w round-today', `x=1 points ${JSON.stringify(atOne)}`);
   }
 
@@ -893,121 +836,168 @@ function v9(key) {
 
 /* ── V9w ── Tooltip row order per window; no ended rows ────────────────────── */
 function v9w() {
+  let armHits = 0;
   for (const c of enabledWindows('V9w')) {
     const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
     const lines = M.activeLinesOf(c.data);
     const ids = lines.map((l) => l.id);
-    const clampedIds = lines.filter((l) => l.points.some((p) => p.y < c.data.yMin || p.y > c.data.yMax)).map((l) => l.id);
+    const restingIds = lines.filter((l) => !M.playedInWindow(l, c.ws, TODAY)).map((l) => l.id);
     const selections = [[], ids.slice(0, 2), ids.slice(0, M.MAX_SELECTED)];
-    if (clampedIds.length) selections.push(clampedIds.slice(0, M.MAX_SELECTED));
-    const cursors = [M.PAD_T + 20, M.PAD_T + 130, M.PAD_T + 240];
+    if (restingIds.length) selections.push(restingIds.slice(0, M.MAX_SELECTED));
+    // The last cursor sits on the baseline, right where every resting player is.
+    const cursors = [M.PAD_T + 20, M.PAD_T + 130, M.PAD_T + 240, s.toSvgY(0)];
 
     let checked = 0;
     let order = 0;
     let pixel = 0;
     let ended = 0;
+    let restingAuto = 0;
+    let notSelection = 0;
+    let restingRows = 0;
     let maxRows = 0;
     for (const sel of selections) {
       for (const cy of cursors) {
         for (const d of c.data.dates) {
           const nx = c.toX(d);
-          const rows = M.buildTooltipRows(lines, nx, sel, cy, s);
+          const rows = M.buildWindowTooltipRows(c.data, c.ws, TODAY, nx, sel, cy, s);
           maxRows = Math.max(maxRows, rows.length);
           if (rows.some((r) => r.ended)) ended++;
-          for (let i = 1; i < rows.length; i++) {
-            const a = rows[i - 1];
-            const b = rows[i];
-            if (b.svgY < a.svgY - 1e-9 || (Math.abs(b.svgY - a.svgY) <= 1e-9 && b.value > a.value)) order++;
-          }
+          for (let i = 1; i < rows.length; i++) if (rows[i].svgY < rows[i - 1].svgY - 1e-9) order++;
           for (const row of rows) {
             const line = lines.find((l) => l.id === row.id);
-            if (Math.abs(s.plotY(M.valueAt(line.points, nx)) - row.svgY) > 1e-9) pixel++;
+            if (Math.abs(s.toSvgY(M.valueAt(line.points, nx)) - row.svgY) > 1e-9) pixel++;
+            if (restingIds.includes(row.id)) {
+              restingRows++;
+              if (row.value !== 0) pixel++;
+            }
           }
+          if (sel.length === 0 && rows.some((r) => restingIds.includes(r.id))) restingAuto++;
+          if (sel.length > 0 && rows.map((r) => r.id).sort().join() !== [...sel].sort().join()) notSelection++;
           checked++;
         }
       }
+      // Arm: plain buildTooltipRows, cursor on the baseline, pulls resting players in.
+      const plain = M.buildTooltipRows(lines, c.toX(c.data.dates[c.data.dates.length - 1]), [], s.toSvgY(0), s);
+      if (sel.length === 0 && plain.some((r) => restingIds.includes(r.id))) armHits++;
     }
     const name = `V9w ${c.key} ${c.rk}`;
-    if (order + pixel + ended === 0 && maxRows <= M.MAX_TOOLTIP_ROWS) {
-      ok(name, `${checked} states: order svgY then value, dots on plotY, no ended rows, max ${maxRows} rows`);
+    if (order + pixel + ended + restingAuto + notSelection === 0 && maxRows <= M.MAX_TOOLTIP_ROWS && (restingIds.length === 0 || restingRows > 0)) {
+      ok(name, `${checked} states: rows in svgY order with dots on the line, no ended rows; ${restingIds.length} resting players never in the automatic rows (cursor on the baseline included), each selected one a row at 0; max ${maxRows} rows`);
     } else {
-      bad(name, `order ${order}, pixel ${pixel}, ended-row states ${ended}, max rows ${maxRows}`);
+      bad(name, `order ${order}, pixel ${pixel}, ended ${ended}, resting in automatic rows ${restingAuto}, not the selection ${notSelection}, resting rows ${restingRows}, max rows ${maxRows}`);
     }
   }
-
-  // Tie-break coverage. The fixture never parks two players on the same edge, so
-  // force it: three players far below the window, all selected.
-  const scores = [
-    sc('p0', -300, '2026-05-01'), sc('p1', -250, '2026-05-01'), sc('p2', -280, '2026-05-01'),
-    sc('p3', 10, '2026-05-01'), sc('p3', 5, M.windowStartOf(TODAY, 1)),
-    sc('p4', 20, '2026-05-01'), sc('p4', -5, M.windowStartOf(TODAY, 1)),
-  ];
-  const season = M.buildChartData(scores, people(5), '2026-01-01', TODAY);
-  const ws = M.windowStartOf(TODAY, 4);
-  const w = M.windowChartData(season, '2026-01-01', ws, TODAY);
-  const s = M.makeScales(SVG_W, w.yMin, w.yMax);
-  const rows = M.buildTooltipRows(M.activeLinesOf(w), M.makeToX(ws, TODAY)(M.windowStartOf(TODAY, 1)), ['p0', 'p1', 'p2'], M.PAD_T, s);
-  const floor = M.PAD_T + s.plotH;
-  const order = rows.map((r) => r.id).join(',');
-  if (rows.length === 3 && rows.every((r) => r.svgY === floor) && order === 'p1,p2,p0') {
-    ok('V9w floor tie-break', 'three players parked on the floor list by true value, highest first (p1 -250, p2 -280, p0 -300)');
-  } else {
-    bad('V9w floor tie-break', `rows ${order} svgY ${rows.map((r) => r.svgY)} (floor ${floor})`);
-  }
+  if (armHits > 0) ok('V9w arm', `plain tooltip rows with the cursor on the baseline include resting players in ${armHits} window(s) — the exclusion is doing something`);
+  else bad('V9w arm', 'plain tooltip rows never included a resting player — the exclusion is untested');
 }
 
-/* ── V13 ── The same moment reads the same value in Season and in a window ─────
- * What Q3 (true crop) buys. Every pixel column of the window is mapped through
- * epoch ms to Season's nx, and the two lines must agree wherever Season has a value.
+/* ── V13 ── A window reports the change actually made, and agrees with Season ───
+ * (a) Exact dollars. The REFERENCE is computed here, from the raw fixture score rows:
+ *     score_override ?? score_value, summed over rows dated (windowStart, today]. No
+ *     buildChartData, no view. Every player's window value at x=1 must equal it.
+ * (b) Season agreement. From a player's first round in the window on, at every pixel
+ *     column: window value == Season value - origin (their total through windowStart).
+ *     Before that round the two differ by design — the window rises from 0 at the edge.
+ * Falsifiers, both judged against (a): the crop's origin, read off the Season line's
+ * interpolated value at the edge; and a rebase off the first in-window vertex.
  */
 function v13() {
+  const table = [];
+  let interpTotal = 0;
+  let vertexTotal = 0;
+  let vertexMovers = 0;
   for (const c of enabledWindows('V13')) {
+    const f = fixture[c.key];
     const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
     const seasonLines = M.activeLinesOf(c.season);
     const winLines = M.activeLinesOf(c.data);
+    const seasonToX = M.makeToX(c.seasonStart, TODAY);
     const wMs = M.dayMs(c.ws);
     const tMs = M.dayMs(TODAY);
     const ssMs = M.dayMs(c.seasonStart);
+    const reference = (id) =>
+      f.scores.filter((r) => r.player_id === id && r.round_date > c.ws && r.round_date <= TODAY).reduce((t, r) => t + (r.score_override ?? r.score_value ?? 0), 0);
 
-    // The rejected entry rule: the step value at the window start (last Season
-    // vertex on or before it), everything else identical.
-    const rejected = seasonLines.map((l) => {
-      let entry = 0;
-      for (const p of l.points) if (p.date <= c.ws) entry = p.y;
-      const pts = [{ x: 0, y: entry }];
-      for (const p of l.points.slice(1)) if (c.inWindow(p.date)) pts.push({ x: c.toX(p.date), y: p.y });
-      if (pts[pts.length - 1].x < 1) pts.push({ x: 1, y: pts[pts.length - 1].y });
-      return pts;
-    });
-
+    const off = [];
+    let played = 0;
+    let interpOff = 0;
+    let withVertex = 0;
+    let vertexOff = 0;
     let compared = 0;
     let differ = 0;
-    let seasonEnded = 0;
-    let rejectedDiffer = 0;
-    for (let px = 0; px <= s.plotW; px++) {
-      const nx = px / s.plotW;
-      const snx = Math.max(0, (wMs + nx * (tMs - wMs) - ssMs) / (tMs - ssMs));
-      for (let i = 0; i < seasonLines.length; i++) {
-        if (seasonLines[i].id !== winLines[i].id) {
-          bad(`V13 ${c.key} ${c.rk}`, 'line order differs between Season and window');
-          return;
-        }
-        const a = M.valueAt(seasonLines[i].points, snx);
-        const b = M.valueAt(winLines[i].points, nx);
-        if (a === null) {
-          if (b !== null) seasonEnded++;
+    let beforeFirst = 0;
+    let vertices = 0;
+    for (let i = 0; i < seasonLines.length; i++) {
+      const sl = seasonLines[i];
+      const wl = winLines[i];
+      if (sl.id !== wl.id) {
+        bad(`V13 ${c.key} ${c.rk}`, 'line order differs between Season and window');
+        return;
+      }
+      const truth = reference(sl.id);
+      const final = wl.points[wl.points.length - 1].y;
+      if (Math.abs(final - truth) > 1e-9) off.push(`${sl.id} window ${final}, reference ${truth}`);
+
+      const last = sl.points[sl.points.length - 1].y;
+      const firstIn = sl.points.slice(1).find((p) => c.inWindow(p.date));
+      if (M.playedInWindow(sl, c.ws, TODAY)) {
+        played++;
+        const interp = M.valueAt(sl.points, seasonToX(c.ws)) ?? last;
+        if (Math.round(last - interp) !== Math.round(truth)) interpOff++;
+      }
+      if (firstIn) {
+        withVertex++;
+        if (Math.abs(last - firstIn.y - truth) > 1e-9) vertexOff++;
+      }
+
+      let origin = 0;
+      for (const p of sl.points.slice(1)) if (p.date <= c.ws) origin = p.y;
+      const fromNx = firstIn ? c.toX(firstIn.date) : Infinity;
+      for (let px = 0; px <= s.plotW; px++) {
+        const nx = px / s.plotW;
+        if (nx < fromNx) {
+          beforeFirst++;
           continue;
         }
+        const a = M.valueAt(sl.points, (wMs + nx * (tMs - wMs) - ssMs) / (tMs - ssMs));
+        if (a === null) continue; // past Season's last vertex: the window holds
+        const b = M.valueAt(wl.points, nx);
         compared++;
-        if (b === null || Math.abs(a - b) > 1e-9) differ++;
-        if (Math.abs(M.valueAt(rejected[i], nx) - a) > 1e-6) rejectedDiffer++;
+        if (b === null || Math.abs(a - origin - b) > 1e-9) differ++;
+      }
+      // And exactly at every in-window round. Pixel columns rarely land on a vertex, and
+      // a player whose first round in the window is also their last has no Season value
+      // right of it — without these, a window of such players compared nothing.
+      for (const p of sl.points.slice(1)) {
+        if (!c.inWindow(p.date)) continue;
+        const b = M.valueAt(wl.points, c.toX(p.date));
+        vertices++;
+        if (b === null || Math.abs(p.y - origin - b) > 1e-9) differ++;
       }
     }
+
     const name = `V13 ${c.key} ${c.rk}`;
-    if (compared > 0 && differ === 0) ok(name, `${compared} column comparisons, Season and window agree; ${seasonEnded} where Season has ended and the window holds (expected, Q2)`);
-    else bad(name, `${differ} of ${compared} comparisons disagree`);
-    if (rejectedDiffer > 0) ok(name + ' falsifier', `step-value entry disagrees with Season at ${rejectedDiffer} (test discriminates)`);
-    else bad(name + ' falsifier', 'step-value entry agreed everywhere — V13 cannot tell a crop from the rejected rule');
+    if (off.length === 0) {
+      ok(`${name} dollars`, `${seasonLines.length} players: window value at x=1 == reference. Reference = score_override ?? score_value summed over the RAW fixture score rows dated (${c.ws}, ${TODAY}] — no buildChartData, no view`);
+    } else {
+      bad(`${name} dollars`, `${off.length} players off the reference (raw fixture score rows in (${c.ws}, ${TODAY}], no buildChartData, no view): ${off.slice(0, 4).join('; ')}`);
+    }
+    if (vertices > 0 && differ === 0) ok(`${name} Season`, `window == Season - origin at all ${vertices} in-window rounds and ${compared} columns from each player's first in-window round on; ${beforeFirst} columns before it not compared (the window rises from 0 there by design)`);
+    else bad(`${name} Season`, `${differ} of ${vertices + compared} comparisons disagree (${vertices} rounds, ${compared} columns)`);
+
+    table.push([`${c.key} ${c.rk}`, `${interpOff} of ${played}`, `${vertexOff} of ${withVertex}`]);
+    interpTotal += interpOff;
+    vertexTotal += vertexOff;
+    vertexMovers += withVertex;
+  }
+
+  console.log('    falsifiers — players whose change would be wrong against the reference:');
+  console.log(`    ${'window'.padEnd(16)}${'interpolated origin'.padEnd(24)}first in-window vertex`);
+  for (const [w, a, b] of table) console.log(`    ${w.padEnd(16)}${a.padEnd(24)}${b}`);
+  if (interpTotal > 0 && vertexTotal === vertexMovers && vertexMovers > 0) {
+    ok('V13 falsifiers', `interpolated origin wrong for ${interpTotal} players across the windows; first-vertex origin wrong for all ${vertexMovers} players with an in-window round (test discriminates)`);
+  } else {
+    bad('V13 falsifiers', `interpolated origin wrong for ${interpTotal}, first-vertex origin wrong for ${vertexTotal} of ${vertexMovers} — a rejected rule passes`);
   }
 }
 
@@ -1038,31 +1028,179 @@ function vPills() {
   }
 }
 
-/* ── V-clamp ── Clamping is exact: only wholly horizontal lines leave the domain */
-function clampViolations(lines, data, inWindow) {
-  const out = [];
-  for (const l of lines) {
-    const outside = l.points.some((p) => p.y < data.yMin || p.y > data.yMax);
-    if (outside && new Set(l.points.map((p) => p.y)).size !== 1) out.push(`${l.id} leaves the domain but is not horizontal`);
-    if (l.playedDates.some(inWindow) && outside) out.push(`${l.id} played in the window but leaves the domain`);
+/* ── V-origin ── Windows start every line at 0; Season and All time are not rebased ─
+ * The rebase is scoped to 10 days and 4 days, and the second half pins that scope: an
+ * implementation that rebased every range would pass the first half. Season lines DO
+ * start at {x:0, y:0} — that point is the season origin — so Season's half asserts what
+ * a rebase would break instead: each line ends on the player's full-season total.
+ */
+function vOrigin() {
+  let windowLines = 0;
+  let restingLines = 0;
+  const problems = [];
+  for (const c of enabledWindows('V-origin')) {
+    for (const l of M.activeLinesOf(c.data)) {
+      windowLines++;
+      if (l.points[0].x !== 0 || l.points[0].y !== 0) problems.push(`${c.key} ${c.rk} ${l.id} starts at ${JSON.stringify(l.points[0])}`);
+      if (!M.playedInWindow(l, c.ws, TODAY)) {
+        restingLines++;
+        if (l.points.some((p) => p.y !== 0)) problems.push(`${c.key} ${c.rk} ${l.id} did not play but moves`);
+      }
+    }
   }
+  if (problems.length === 0 && windowLines > 0 && restingLines > 0) ok('V-origin windows', `all ${windowLines} lines in every enabled window start at exactly {x:0, y:0}; all ${restingLines} resting lines are 0 throughout`);
+  else bad('V-origin windows', problems.slice(0, 4).join('; ') || `windowLines=${windowLines} restingLines=${restingLines}`);
+
+  // Season: cumulative. Every line ends on the player's full-season raw sum, and for
+  // some player that is not their window change — so a rebased Season would fail.
+  {
+    const scope = [];
+    let differsFromWindow = 0;
+    for (const key of FIXTURES) {
+      const f = fixture[key];
+      const season = M.buildChartData(f.scores, f.standings, f.seasonStart, TODAY);
+      const w = windowCase(key, 'd10');
+      for (const l of M.activeLinesOf(season)) {
+        const full = f.scores.filter((r) => r.player_id === l.id).reduce((t, r) => t + (r.score_override ?? r.score_value ?? 0), 0);
+        const end = l.points[l.points.length - 1].y;
+        if (Math.abs(end - full) > 1e-9) scope.push(`${key} ${l.id} Season ends ${end}, full season ${full}`);
+        if (w.enabled) {
+          const wl = w.data.lines.find((x) => x.id === l.id);
+          if (Math.abs(wl.points[wl.points.length - 1].y - end) > 1e-9) differsFromWindow++;
+        }
+      }
+    }
+    if (scope.length === 0 && differsFromWindow > 0) ok('V-origin Season', `every Season line ends on the player's full-season total from the raw rows; ${differsFromWindow} of them differ from the player's 10-day change, so a rebased Season would fail`);
+    else bad('V-origin Season', scope.slice(0, 3).join('; ') || `no Season line differs from its window change (${differsFromWindow})`);
+  }
+
+  // All time: each career starts at 0 on the player's own first season, not at x=0.
+  {
+    const c = careerCase('windexcup');
+    const lines = M.activeLinesOf(c.data);
+    const late = lines.filter((l) => l.points[0].x > 0);
+    const wrong = lines.filter((l) => l.points[0].y !== 0 || Math.abs(l.points[0].x - c.toX(c.spans[c.data.firstSpan.get(l.id)].start)) > 1e-12);
+    if (late.length > 0 && wrong.length === 0) ok('V-origin All time', `${lines.length} careers each start at 0 on their own first season; ${late.length} of them past x=0, so a rebase to x=0 would fail`);
+    else bad('V-origin All time', `late starts ${late.length}, misplaced starts ${wrong.map((l) => l.id).join(',')}`);
+  }
+}
+
+/* ── V-inactive ── Who rests in a window, and that they are painted under the baseline */
+const PRE_REBASE_COMMIT = '19ed291';
+
+function windowPaintProblems(text) {
+  const idx = {
+    resting: text.indexOf('key={`rest-${line.id}`}'),
+    baseline: text.indexOf('strokeWidth={BASELINE_STROKE}'),
+    dim: text.indexOf('key={`dim-${line.id}`}'),
+    selected: text.indexOf('key={`sel-${line.id}`}'),
+  };
+  const out = [];
+  const missing = Object.entries(idx).filter(([, i]) => i < 0).map(([k]) => k);
+  if (missing.length) out.push(`missing: ${missing.join(', ')}`);
+  else if (!(idx.resting < idx.baseline && idx.baseline < idx.dim && idx.dim < idx.selected)) out.push(`paint order ${JSON.stringify(idx)}`);
+  if (!text.includes('stroke={c.chartInactive}')) out.push('resting lines are not painted chartInactive');
+  if (!text.includes('resting.has(l.id) && !selected.includes(l.id)')) out.push('a selected resting player is not kept out of the resting pass');
   return out;
 }
 
-function vClamp() {
-  let clamped = 0;
-  for (const c of enabledWindows('V-clamp')) {
+function vInactive() {
+  const want = { 'windexcup d10': '5/7', 'windexcup d4': '4/8', 'ycwindex d10': '3/6' };
+  const got = [];
+  const problems = [];
+  for (const c of enabledWindows('V-inactive')) {
+    const key = `${c.key} ${c.rk}`;
     const lines = M.activeLinesOf(c.data);
-    clamped += lines.filter((l) => l.points.some((p) => p.y < c.data.yMin || p.y > c.data.yMax)).length;
-    const v = clampViolations(lines, c.data, c.inWindow);
-    if (v.length === 0) ok(`V-clamp ${c.key} ${c.rk}`, 'every line outside the domain is wholly horizontal; every player who played is inside');
-    else bad(`V-clamp ${c.key} ${c.rk}`, v.join('; '));
+    const active = lines.filter((l) => M.playedInWindow(l, c.ws, TODAY)).length;
+    got.push(`${key} ${active}/${lines.length - active}`);
+    if (want[key] && want[key] !== `${active}/${lines.length - active}`) problems.push(`${key} ${active}/${lines.length - active}, want ${want[key]}`);
+    // Independent: a player rests iff the raw fixture has no score row for them in the window.
+    for (const l of lines) {
+      const hasRow = fixture[c.key].scores.some((r) => r.player_id === l.id && r.round_date > c.ws && r.round_date <= TODAY);
+      if (hasRow !== M.playedInWindow(l, c.ws, TODAY)) problems.push(`${key} ${l.id} raw rows say ${hasRow}`);
+    }
   }
-  // Arm: a line that CROSSES the boundary must be flagged, or this check cannot fail.
-  const crossing = { id: 'x', playedDates: [], points: [{ x: 0, y: 0 }, { x: 1, y: 1000 }] };
-  const armed = clampViolations([crossing], { yMin: -10, yMax: 10 }, () => false).length > 0;
-  if (armed && clamped > 0) ok('V-clamp arm', `a boundary-crossing line is flagged; ${clamped} real clamped lines checked`);
-  else bad('V-clamp arm', `crossing flagged=${armed}, real clamped lines=${clamped}`);
+  if (problems.length === 0) ok('V-inactive classification', `active/resting ${got.join(', ')}; every player agrees with the raw score rows (a zero-point round counts as played — V7w)`);
+  else bad('V-inactive classification', problems.slice(0, 4).join('; '));
+
+  const now = windowPaintProblems(fs.readFileSync(COMPONENT, 'utf8'));
+  if (now.length === 0) ok('V-inactive paint order', 'HistoryChart paints resting (chartInactive) -> baseline -> movers -> selected; a selected resting player takes its hue');
+  else bad('V-inactive paint order', now.join('; '));
+  const pre = windowPaintProblems(execFileSync('git', ['show', `${PRE_REBASE_COMMIT}:windex-expo/components/HistoryChart.tsx`], { cwd: EXPO, encoding: 'utf8', stdio: 'pipe' }));
+  if (pre.length > 0) ok('V-inactive arm', `HistoryChart@${PRE_REBASE_COMMIT} fails the same parse (${pre.length} problems)`);
+  else bad('V-inactive arm', `HistoryChart@${PRE_REBASE_COMMIT} passes — the parse cannot see the change`);
+}
+
+/* ── V-header ── A window's tooltip says it is a change, and signs it ─────────── */
+function vHeader() {
+  const cases = [
+    [M.windowHeader('2026-08-01', '2026-08-08'), 'Change, 1 Aug → 8 Aug'],
+    [M.windowHeader('2026-07-28', '2026-08-03'), 'Change, 28 Jul → 3 Aug'],
+    [M.formatSigned(138), '+138'],
+    [M.formatSigned(-57), '-57'],
+    [M.formatSigned(0), '0'],
+    [M.formatSigned(-0.4), '0'],
+    [M.formatSigned(0.4), '0'],
+    [M.formatSigned(2.5), '+3'],
+    [M.formatSigned(-2.5), '-2'],
+  ];
+  const wrong = cases.filter(([got, want]) => got !== want);
+  if (wrong.length === 0) ok('V-header', `"${cases[0][0]}", "${cases[1][0]}" across a month; +138 / -57 / 0, never "-0", rounded like the leaderboard (2.5 -> +3, -2.5 -> -2)`);
+  else bad('V-header', wrong.map(([got, want]) => `"${got}" want "${want}"`).join('; '));
+}
+
+/* ── V-dim ── chartInactive sits between the gridline and chartDim, in both modes ──
+ * Read from constants/theme.ts, so a later tweak cannot quietly collapse it into
+ * either neighbour. Contrast is WCAG against the page background; separation is OKLab
+ * ΔE x100 — the same units the palette gate uses.
+ */
+function vDim() {
+  const text = fs.readFileSync(path.join(EXPO, 'constants', 'theme.ts'), 'utf8');
+  const [light, dark] = text.split(/\n\s*dark:\s*\{/);
+  const token = (block, name) => {
+    const m = block.match(new RegExp(`\\b${name}:\\s*'(#[0-9A-Fa-f]{3,6})'`));
+    return m ? m[1] : null;
+  };
+  const rgb = (h) => {
+    let s = h.slice(1);
+    if (s.length === 3) s = s.split('').map((ch) => ch + ch).join('');
+    return [0, 2, 4].map((i) => parseInt(s.slice(i, i + 2), 16) / 255);
+  };
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  const lum = (h) => {
+    const [r, g, b] = rgb(h).map(lin);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a, b) => {
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const oklab = (h) => {
+    const [r, g, b] = rgb(h).map(lin);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+  };
+  const dE = (a, b) => {
+    const [p, q] = [oklab(a), oklab(b)];
+    return 100 * Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+  };
+  const judge = (bg, grid, dim, inactive) =>
+    contrast(grid, bg) < contrast(inactive, bg) && contrast(inactive, bg) < contrast(dim, bg) && dE(inactive, grid) >= 4 && dE(inactive, dim) >= 4;
+
+  for (const [mode, block] of [['light', light], ['dark', dark]]) {
+    const [bg, grid, dim, inactive] = ['background', 'border', 'chartDim', 'chartInactive'].map((n) => token(block || '', n));
+    if (![bg, grid, dim, inactive].every(Boolean)) {
+      bad(`V-dim ${mode}`, `could not read tokens: background=${bg} border=${grid} chartDim=${dim} chartInactive=${inactive}`);
+      continue;
+    }
+    const msg = `${inactive}: contrast ${contrast(inactive, bg).toFixed(2)} between gridline ${contrast(grid, bg).toFixed(2)} and chartDim ${contrast(dim, bg).toFixed(2)}; ΔE ${dE(inactive, grid).toFixed(1)} from gridline, ${dE(inactive, dim).toFixed(1)} from chartDim`;
+    if (judge(bg, grid, dim, inactive)) ok(`V-dim ${mode}`, msg);
+    else bad(`V-dim ${mode}`, msg);
+    // Arm: chartDim itself, or the gridline, as the inactive colour must fail.
+    if (judge(bg, grid, dim, dim) || judge(bg, grid, dim, grid)) bad(`V-dim ${mode} arm`, 'chartDim or the gridline passes as chartInactive — the check cannot fail');
+  }
 }
 
 /* ── V12 ── Season output byte-identical to BASELINE_COMMIT ───────────────── */
@@ -1349,10 +1487,10 @@ function v1c() {
         if ((v === null) !== (B === null)) worst = Infinity;
         continue;
       }
-      worst = Math.max(worst, Math.abs(s.plotY(v) - B));
+      worst = Math.max(worst, Math.abs(s.toSvgY(v) - B));
       compared++;
       const cf = carryForward(line.points, nx);
-      if (cf !== null && Math.abs(s.plotY(cf) - B) > 0.5) carryDis++;
+      if (cf !== null && Math.abs(s.toSvgY(cf) - B) > 0.5) carryDis++;
     }
     // At a snap date the tooltip reads the season's vertex itself, exactly.
     for (const d of c.data.dates) {
@@ -1379,7 +1517,7 @@ function v2c() {
   const domains = selections.map((sel) => {
     void M.assignHues(ids, sel);
     const s = M.makeScales(SVG_W, c.data.yMin, c.data.yMax);
-    return [c.data.yMin, c.data.yMax, s.toSvgY(0), s.plotY(100)].join('|');
+    return [c.data.yMin, c.data.yMax, s.toSvgY(0), s.toSvgY(100)].join('|');
   });
   if (domains.every((d) => d === domains[0])) ok('V2c selection', `domain [${c.data.yMin}, ${c.data.yMax}] identical across ${selections.length} selection states`);
   else bad('V2c selection', `domain moved with selection: ${JSON.stringify(domains)}`);
@@ -1632,7 +1770,7 @@ function v9c() {
         }
         for (const row of positioned) {
           const line = lines.find((l) => l.id === row.id);
-          if (Math.abs(s.plotY(M.valueAt(line.points, c.toX(d))) - row.svgY) > 1e-9) pixel++;
+          if (Math.abs(s.toSvgY(M.valueAt(line.points, c.toX(d))) - row.svgY) > 1e-9) pixel++;
         }
         const joined = rows.filter((r) => r.joined);
         for (let i = 1; i < joined.length; i++) if (firstOf(joined[i].id) < firstOf(joined[i - 1].id)) order++;
@@ -1959,12 +2097,18 @@ console.log('\n=== V7w  degenerate windows ===');
 run('V7w', v7w);
 console.log('\n=== V9w  windowed tooltip order ===');
 run('V9w', v9w);
-console.log('\n=== V13  Season and window agree at the same moment ===');
+console.log('\n=== V13  window change == raw score rows, and agrees with Season ===');
 run('V13', v13);
 console.log('\n=== V-pills  players, order, hues across ranges ===');
 run('V-pills', vPills);
-console.log('\n=== V-clamp  clamping is exact ===');
-run('V-clamp', vClamp);
+console.log('\n=== V-origin  windows start at 0; Season and All time are not rebased ===');
+run('V-origin', vOrigin);
+console.log('\n=== V-inactive  who rests, painted under the baseline ===');
+run('V-inactive', vInactive);
+console.log('\n=== V-header  change header and signed values ===');
+run('V-header', vHeader);
+console.log('\n=== V-dim  chartInactive between gridline and chartDim ===');
+run('V-dim', vDim);
 console.log('\n=== All time  V-order  seasons in start_date order, never id ===');
 run('V-order', vOrder);
 console.log('\n=== V1c  career interpolation vs rendered pixel ===');
