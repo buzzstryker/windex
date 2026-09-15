@@ -466,21 +466,43 @@ export function assignHues(allIds: string[], selectedIds: string[]): Map<string,
 
 /* ── Axis ticks ────────────────────────────────────────────────────────────── */
 
-export function niceTickValues(min: number, max: number, count: number): number[] {
-  const range = max - min || 1;
-  const roughStep = range / (count - 1);
-  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
-  const options = [1, 2, 5, 10];
-  let step = options[0] * magnitude;
-  for (const o of options) {
-    if (o * magnitude >= roughStep) {
-      step = o * magnitude;
-      break;
+/** How many y gridlines every range aims for. */
+export const TARGET_Y_GRIDLINES = 5;
+
+/**
+ * Y gridline values: the multiples of one 1-2-5 x 10^n step that fall inside [min, max],
+ * choosing the step that puts closest to TARGET_Y_GRIDLINES lines inside the domain —
+ * the finer step on a tie.
+ *
+ * The domain is NOT rounded out to the step. Steps jump 2-2.5x, so pulling the top and
+ * bottom edges onto gridlines costs up to a whole step of empty plot — 44% of the 4-day
+ * window on real data, most of what the rebase bought. The edge labels float instead.
+ *
+ * The old rule took range/5 and rounded UP to the next nice number, which can nearly
+ * triple the step: a 10-day window of 1,099 points drew only 0 and 500.
+ *
+ * 0 is a multiple of every step, so whenever the domain spans 0 it is a gridline — and
+ * every range's domain does (V-ticks).
+ */
+export function niceTickValues(min: number, max: number): number[] {
+  const span = max - min;
+  if (!(span > 0)) return [];
+  const count = (step: number) => Math.floor(max / step) - Math.ceil(min / step) + 1;
+  // Ascending steps from ~span/100 (far too many lines) to ~10x span (at most one), so a
+  // strictly-closer test keeps the finer step on a tie.
+  const top = Math.floor(Math.log10(span));
+  let best = { step: 1, off: Infinity };
+  for (let e = top - 2; e <= top + 1; e++) {
+    for (const m of [1, 2, 5]) {
+      const step = m * Math.pow(10, e);
+      const off = Math.abs(count(step) - TARGET_Y_GRIDLINES);
+      if (off < best.off) best = { step, off };
     }
   }
-  const start = Math.floor(min / step) * step;
   const ticks: number[] = [];
-  for (let v = start; v <= max + step * 0.01; v += step) ticks.push(Math.round(v));
+  for (let k = Math.ceil(min / best.step); k <= Math.floor(max / best.step); k++) {
+    ticks.push(Math.round(k * best.step * 1e6) / 1e6 || 0);
+  }
   return ticks;
 }
 

@@ -254,7 +254,7 @@ export function HistoryChart({ seasonId, groupId, standings, seasonStartDate, se
   const snapDates = view.dates;
   const s = makeScales(svgWidth, yMin, yMax);
   const xTicks = view.ticks;
-  const yTicks = niceTickValues(yMin, yMax, 6);
+  const yTicks = niceTickValues(yMin, yMax);
 
   // 10 days and 4 days show the change since windowStart. A player who did not play in
   // the window sits flat on 0: drawn extra-dim, under the baseline, and left out of the

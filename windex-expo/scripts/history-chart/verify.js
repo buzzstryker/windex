@@ -8,7 +8,9 @@
  *   Rebase   V-origin V-inactive V-header V-dim
  *   All time V-order V1c V2c V3c V7c V9c V13c V-pills-c V-reach
  *   Axis     V-axis  a finished season's Season chart covers exactly that season
- *   Pins     V12  Season output byte-identical to the pre-ranges commit
+ *   Ticks    V-ticks  y gridlines on every range (V12 does not see them)
+ *   Pins     V12  Season output byte-identical to the pre-ranges commit — IN THE FIELDS
+ *                 its header lists; y gridlines and all rendering are outside it
  *            V14  Standings toggle styles identical to the pre-extraction commit
  *
  * Runs against the COMPILED lib/historyChartMath.ts — the same module the
@@ -1203,7 +1205,102 @@ function vDim() {
   }
 }
 
+/* ── V-ticks ── Y gridlines: one 1-2-5 step, closest to 5 lines, 0 always on one ─
+ * Every range's y gridlines, on every fixture range, the real domains from 2026-09-15,
+ * and the spreads named when the rule was chosen. V12 does NOT cover y gridlines: its
+ * snapshot never included them, so Season's windexcup count moving 2 -> 6 left it
+ * byte-identical. This is the check that sees them.
+ */
+function vTicks() {
+  const cases = [];
+  const add = (label, yMin, yMax, wantStep) => cases.push({ label, yMin, yMax, wantStep });
+  for (const key of FIXTURES) {
+    const season = load(key).data;
+    add(`${key} Season`, season.yMin, season.yMax);
+    for (const rk of WINDOWS) {
+      const c = windowCase(key, rk);
+      if (c.enabled) add(`${key} ${rk}`, c.data.yMin, c.data.yMax);
+    }
+    const cc = careerCase(key);
+    add(`${key} All time`, cc.data.yMin, cc.data.yMax);
+  }
+  const f = fixture.windexcup2025;
+  const fin = M.buildChartData(f.scores, f.standings, f.seasonStart, f.seasonEnd);
+  add('windexcup2025 Season', fin.yMin, fin.yMax);
+  add('real 10 days 2026-09-15', -499, 600);
+  add('real 4 days 2026-09-15', -260, 282);
+  add('real Season 2026-09-15', -673, 1232);
+  add('real All time 2026-09-15', -2828, 4229);
+  add('a 500-point window', -100, 400, 100);
+  add('a quiet 40-point window', -15, 25, 10);
+  add('a ~5,900-point All time', -2300, 3600, 1000);
+  add('flat at 0', -10, 10);
+
+  // Independent brute force over every 1-2-5 step from 0.01 to 10^7: the smallest
+  // distance from 5 lines any step achieves, and the finest step that achieves it.
+  const bruteSteps = [];
+  for (let e = -2; e <= 7; e++) for (const m of [1, 2, 5]) bruteSteps.push(m * Math.pow(10, e));
+  const inside = (st, lo, hi) => Math.floor(hi / st) - Math.ceil(lo / st) + 1;
+
+  const problems = [];
+  const summary = [];
+  for (const c of cases) {
+    const ticks = M.niceTickValues(c.yMin, c.yMax);
+    const step = ticks.length > 1 ? ticks[1] - ticks[0] : null;
+    const s = M.makeScales(SVG_W, c.yMin, c.yMax);
+    const mantissa = step ? step / Math.pow(10, Math.floor(Math.log10(step) + 1e-9)) : null;
+    if (!step || ![1, 2, 5].some((m) => Math.abs(mantissa - m) < 1e-9)) problems.push(`${c.label}: step ${step} is not 1-2-5 x 10^n`);
+    if (step && ticks.some((v, i) => i > 0 && Math.abs(v - ticks[i - 1] - step) > 1e-9)) problems.push(`${c.label}: uneven steps ${ticks}`);
+    if (c.yMin <= 0 && c.yMax >= 0 && !ticks.includes(0)) problems.push(`${c.label}: 0 is not a gridline (${ticks})`);
+    if (ticks.some((v) => v < c.yMin || v > c.yMax || s.toSvgY(v) < M.PAD_T || s.toSvgY(v) > M.CHART_H - M.PAD_B)) problems.push(`${c.label}: a tick outside the plot`);
+    const bestOff = Math.min(...bruteSteps.map((st) => Math.abs(inside(st, c.yMin, c.yMax) - M.TARGET_Y_GRIDLINES)));
+    const finest = bruteSteps.find((st) => Math.abs(inside(st, c.yMin, c.yMax) - M.TARGET_Y_GRIDLINES) === bestOff);
+    if (Math.abs(ticks.length - M.TARGET_Y_GRIDLINES) !== bestOff || Math.abs(step - finest) > 1e-9) problems.push(`${c.label}: ${ticks.length} lines at step ${step}; closest achievable is ${bestOff} away at step ${finest}`);
+    if (c.wantStep && step !== c.wantStep) problems.push(`${c.label}: step ${step}, want ${c.wantStep}`);
+    const gapPx = ticks.length > 1 ? s.toSvgY(ticks[0]) - s.toSvgY(ticks[1]) : Infinity;
+    if (gapPx < 20) problems.push(`${c.label}: labels ${gapPx.toFixed(1)}px apart`);
+    summary.push(`${c.label} ${ticks.length}@${step}`);
+  }
+  if (problems.length === 0) ok('V-ticks', `${cases.length} domains, each a 1-2-5 step closest to 5 lines (finer on a tie), 0 always a gridline, all inside the plot: ${summary.join('; ')}`);
+  else bad('V-ticks', problems.slice(0, 5).join('; '));
+
+  // Arm: the old rule — range/5 rounded UP to the next 1-2-5 — must fail on the real
+  // 10-day window, where it drew only 0 and 500.
+  const oldRule = (min, max) => {
+    const rough = (max - min) / 5;
+    const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+    const st = [1, 2, 5, 10].map((o) => o * mag).find((v) => v >= rough);
+    const out = [];
+    for (let v = Math.floor(min / st) * st; v <= max + st * 0.01; v += st) if (v >= min && v <= max) out.push(Math.round(v));
+    return out;
+  };
+  const old = oldRule(-499, 600);
+  const now = M.niceTickValues(-499, 600);
+  if (old.length === 2 && Math.abs(old.length - M.TARGET_Y_GRIDLINES) > Math.abs(now.length - M.TARGET_Y_GRIDLINES)) {
+    ok('V-ticks arm', `the old rule on the real 10-day window: ${old.length} gridlines ${JSON.stringify(old)}; this rule: ${now.length} ${JSON.stringify(now)}`);
+  } else {
+    bad('V-ticks arm', `old rule ${JSON.stringify(old)}, new ${JSON.stringify(now)} — the check cannot tell them apart`);
+  }
+}
+
 /* ── V12 ── Season output byte-identical to BASELINE_COMMIT ───────────────── */
+/* "Byte-identical" means identical IN THESE FIELDS and nothing else. Scope, in full:
+ *
+ *   PINNED   Season chart data for windexcup and ycwindex at TODAY — both seasons IN
+ *            PROGRESS: yMin, yMax; the snap dates; every active line's id, name and
+ *            points (x, y, date); every polyline points string; the month ticks (nx,
+ *            label); tooltip rows (id, name, value, ended, lastDate, svgY) for three
+ *            selections x three cursor heights x every date; nearest-5 candidacy per
+ *            line per date; hue slots for those selections; the snap date every 7px.
+ *
+ *   NOT      y gridlines (niceTickValues — V-ticks); the line fields thin and
+ *   PINNED   playedDates; any FINISHED season (V-axis); 10 days, 4 days and All time;
+ *            and everything the component decides or draws — colours, stroke widths,
+ *            paint order, the zero line, tooltip header and value text, pills, the
+ *            range toggle, month-tick anchors.
+ *
+ * A passing V12 says nothing about the second list. A Season change there leaves it green.
+ */
 function seasonSnapshot(Mod, key) {
   const f = fixture[key];
   const data = Mod.buildChartData(f.scores, f.standings, f.seasonStart, TODAY);
@@ -1250,7 +1347,7 @@ function v12() {
   for (const key of FIXTURES) {
     const a = seasonSnapshot(B, key);
     const b = seasonSnapshot(M, key);
-    if (a === b) ok(`V12 ${key}`, `Season byte-identical to ${BASELINE_COMMIT}: domain, points, polyline strings, ticks, tooltip rows, candidates, hues, snaps (${b.length} chars)`);
+    if (a === b) ok(`V12 ${key}`, `Season byte-identical to ${BASELINE_COMMIT} in its pinned fields — domain, points, polyline strings, MONTH ticks, tooltip rows, candidates, hues, snaps (${b.length} chars). Not y gridlines or rendering: see its header`);
     else {
       let i = 0;
       while (i < a.length && a[i] === b[i]) i++;
@@ -2109,6 +2206,8 @@ console.log('\n=== V-header  change header and signed values ===');
 run('V-header', vHeader);
 console.log('\n=== V-dim  chartInactive between gridline and chartDim ===');
 run('V-dim', vDim);
+console.log('\n=== V-ticks  y gridlines: 1-2-5 step closest to 5 lines, 0 on one ===');
+run('V-ticks', vTicks);
 console.log('\n=== All time  V-order  seasons in start_date order, never id ===');
 run('V-order', vOrder);
 console.log('\n=== V1c  career interpolation vs rendered pixel ===');
