@@ -4,7 +4,7 @@ import { PageHeader } from '../components/PageHeader';
 import { DataTable } from '../components/DataTable';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { EmptyState } from '../components/EmptyState';
-import { getStandings, getPlayerStandingsHistory } from '../api/standings';
+import { getSeasonStandings, getPlayerStandingsHistory } from '../api/standings';
 import { listGroups, listSeasons } from '../api/groups';
 import type { StandingRow, Group, Season, PlayerStandingsHistoryResponse } from '../types';
 import { seasonLabel } from '../types';
@@ -16,6 +16,7 @@ export function Standings() {
   const [groupId, setGroupId] = useState(searchParams.get('group_id') ?? '');
   const [seasonId, setSeasonId] = useState(searchParams.get('season_id') ?? '');
   const [standings, setStandings] = useState<StandingRow[]>([]);
+  const [standingsSource, setStandingsSource] = useState<'live' | 'final'>('live');
   const [loading, setLoading] = useState(true);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<StandingRow | null>(null);
@@ -57,9 +58,15 @@ export function Standings() {
     setStandingsLoading(true);
     setSelectedPlayer(null);
     setPlayerHistory(null);
-    getStandings(seasonId, groupId || undefined)
-      .then(setStandings)
-      .catch(() => setStandings([]))
+    getSeasonStandings(seasonId, groupId || undefined)
+      .then((r) => {
+        setStandings(r.rows);
+        setStandingsSource(r.source);
+      })
+      .catch(() => {
+        setStandings([]);
+        setStandingsSource('live');
+      })
       .finally(() => setStandingsLoading(false));
   }, [seasonId, groupId]);
 
@@ -118,7 +125,17 @@ export function Standings() {
         </div>
       </div>
       <div className="card">
-        <h2>Standings</h2>
+        <h2>
+          Standings
+          {seasonId && standingsSource === 'final' && (
+            <span
+              title="Season closed: these are the frozen standings players see. Reopen it on Cup Champions to edit."
+              style={{ marginLeft: 10, display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: '#e8eaf6', color: '#283593', verticalAlign: 'middle' }}
+            >
+              Final
+            </span>
+          )}
+        </h2>
         {!seasonId ? (
           <EmptyState message="Select a group and season to view standings." />
         ) : standingsLoading ? (

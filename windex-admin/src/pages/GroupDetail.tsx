@@ -67,6 +67,22 @@ export function GroupDetail() {
       render: (s: Season) => seasonLabel(s),
     },
     {
+      key: 'closed_at',
+      label: 'Standings',
+      // closed_at (migration 058): standings frozen by Close season on Cup Champions.
+      render: (s: Season) =>
+        s.closed_at ? (
+          <span
+            title={`Frozen ${new Date(s.closed_at).toLocaleString()}`}
+            style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 600, background: '#e8eaf6', color: '#283593' }}
+          >
+            Closed
+          </span>
+        ) : (
+          <span style={{ color: '#888', fontSize: 13 }}>Live</span>
+        ),
+    },
+    {
       key: 'id',
       label: '',
       render: (s: Season) => (

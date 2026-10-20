@@ -1,4 +1,5 @@
 import { apiFetch, ApiError, getAuthToken, writeHeaders } from './client';
+import { listSeasonClosures } from './seasonClosure';
 import type { Group, Season } from '../types';
 
 const SUPABASE_URL = (
@@ -43,8 +44,13 @@ export async function listGroups(): Promise<Group[]> {
 export async function listSeasons(groupId?: string): Promise<Season[]> {
   const path = groupId ? `/seasons?group_id=${encodeURIComponent(groupId)}` : '/seasons';
   try {
-    const data = await apiFetch<{ seasons?: Season[]; data?: Season[] }>(path);
-    return (data as { seasons?: Season[] })?.seasons ?? (data as { data?: Season[] })?.data ?? [];
+    const [data, closures] = await Promise.all([
+      apiFetch<{ seasons?: Season[]; data?: Season[] }>(path),
+      // closed_at (migration 058) isn't in the /seasons Edge Function's select.
+      groupId ? listSeasonClosures(groupId) : Promise.resolve(new Map<string, string | null>()),
+    ]);
+    const rows = (data as { seasons?: Season[] })?.seasons ?? (data as { data?: Season[] })?.data ?? [];
+    return rows.map((s) => ({ ...s, closed_at: closures.get(s.id) ?? null }));
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return [];
     throw e;

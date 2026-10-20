@@ -4,6 +4,8 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { ConfirmToast } from '../components/ConfirmToast';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { closeSeason, reopenSeason } from '../api/seasonClosure';
 import { EditChampionshipResultsModal } from '../components/EditChampionshipResultsModal';
 import { isCurrentUserSuperAdmin, listGroups, listSeasons } from '../api/groups';
 import {
@@ -118,6 +120,11 @@ export function CupChampions() {
   const [editingResultsSeason, setEditingResultsSeason] = useState<Season | null>(null);
   const [editingNotesSeason, setEditingNotesSeason] = useState<Season | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Close / Reopen (migration 060). The database enforces every rule and rolls
+  // back on failure; the UI only pre-disables Close where it would be refused.
+  const [closure, setClosure] = useState<{ season: Season; action: 'close' | 'reopen' } | null>(null);
+  const [closureBusy, setClosureBusy] = useState(false);
+  const [closureError, setClosureError] = useState<string | null>(null);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
 
@@ -254,6 +261,40 @@ export function CupChampions() {
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId) ?? null;
 
+  // Why Close would be refused, mirroring _close_season_core's guards; null = allowed.
+  const closeBlockedReason = (s: Season): string | null => {
+    if (seasonStatus(s, today) !== 'past') return 'Season has not ended';
+    const placed = (resultsBySeason.get(s.id) ?? []).some((r) => r.place !== null);
+    if (!placed) return 'Record the finishing order first';
+    return null;
+  };
+
+  const runClosure = async () => {
+    if (!closure) return;
+    setClosureBusy(true);
+    setClosureError(null);
+    try {
+      if (closure.action === 'close') {
+        const r = await closeSeason(closure.season.id);
+        setToast(`${seasonLabel(closure.season)} closed · ${r.snapshot_rows} standings rows frozen`);
+      } else {
+        const r = await reopenSeason(closure.season.id);
+        setToast(`${seasonLabel(closure.season)} reopened · ${r.snapshot_rows_deleted} frozen rows removed`);
+      }
+      const groupId = closure.season.group_id;
+      setClosure(null);
+      try {
+        await reloadSeasons(groupId);
+      } catch {
+        // The action succeeded; a failed refresh only leaves the badge stale.
+      }
+    } catch (e) {
+      setClosureError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClosureBusy(false);
+    }
+  };
+
   const resolveName = (playerId: string | null | undefined): string | null => {
     if (!playerId) return null;
     const rec = playerNames.get(playerId);
@@ -338,6 +379,11 @@ export function CupChampions() {
                     </td>
                     <td style={td}>
                       <StatusBadge status={status} />
+                      {s.closed_at && (
+                        <div style={{ marginTop: 4 }} title={`Standings frozen ${new Date(s.closed_at).toLocaleString()}`}>
+                          <ClosedBadge />
+                        </div>
+                      )}
                     </td>
                     <td style={td}>
                       {results.length > 0 ? (
@@ -368,6 +414,25 @@ export function CupChampions() {
                       >
                         Notes
                       </button>
+                      {s.closed_at ? (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 10px', fontSize: 13, marginLeft: 6 }}
+                          onClick={() => { setClosureError(null); setClosure({ season: s, action: 'reopen' }); }}
+                        >
+                          Reopen
+                        </button>
+                      ) : status === 'past' ? (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 10px', fontSize: 13, marginLeft: 6 }}
+                          disabled={!!closeBlockedReason(s)}
+                          title={closeBlockedReason(s) ?? 'Freeze this season’s standings'}
+                          onClick={() => { setClosureError(null); setClosure({ season: s, action: 'close' }); }}
+                        >
+                          Close season
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -414,8 +479,49 @@ export function CupChampions() {
         />
       )}
 
+      <ConfirmModal
+        open={!!closure}
+        title={closure?.action === 'reopen'
+          ? `Reopen ${closure ? seasonLabel(closure.season) : ''}?`
+          : `Close ${closure ? seasonLabel(closure.season) : ''}?`}
+        confirmLabel={closure?.action === 'reopen' ? 'Reopen season' : 'Close season'}
+        destructive={closure?.action === 'reopen'}
+        busy={closureBusy}
+        errorMessage={closureError}
+        onConfirm={() => { void runClosure(); }}
+        onCancel={() => { if (!closureBusy) setClosure(null); }}
+      >
+        {closure?.action === 'reopen' ? (
+          <p style={{ margin: 0 }}>
+            Deletes this season&rsquo;s frozen standings and marks it open. Players see live standings
+            again, recomputed from scores. Close it again after any edits.
+          </p>
+        ) : (
+          <p style={{ margin: 0 }}>
+            Freezes this season&rsquo;s standings exactly as they read now. Players see the frozen
+            rows from then on, and later score edits won&rsquo;t show until the season is reopened.
+          </p>
+        )}
+      </ConfirmModal>
+
       {toast && <ConfirmToast message={toast} onClose={() => setToast(null)} duration={4000} />}
     </>
+  );
+}
+
+function ClosedBadge() {
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: 10,
+      fontSize: 12,
+      fontWeight: 600,
+      background: '#e8eaf6',
+      color: '#283593',
+    }}>
+      Closed
+    </span>
   );
 }
 

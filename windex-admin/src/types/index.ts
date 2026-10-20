@@ -113,6 +113,9 @@ export interface Season {
   cup_champion_player_id?: string | null;
   /** Optional free-text note explaining how the champion was decided (migration 025). */
   cup_champion_notes?: string | null;
+  /** Set when the season's standings are frozen (migration 058). NULL/absent = open.
+   *  Not in the /seasons Edge Function response; merged in via listSeasonClosures(). */
+  closed_at?: string | null;
 }
 
 /**
