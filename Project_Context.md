@@ -20,7 +20,7 @@ Windex (formerly **Late Add v2**) is a **points ledger + standings aggregation p
 ## Repo structure
 
 - **GitHub:** https://github.com/buzzstryker/windex (renamed from `late-add-v2` on 2026-05-05; GitHub auto-redirect from old URL is in place)
-- **Local path:** `C:\Users\buzzs\OneDrive\Desktop\Projects\windex\` *(parent folder rename completes after this session via `rename-windex.bat` — see Phase 8 of rename PR)*
+- **Local path:** `C:\Users\buzzs\Projects\windex\` *(parent folder rename completes after this session via `rename-windex.bat` — see Phase 8 of rename PR)*
 - **Default branch:** `master`
 - **Top-level folders:**
   - `windex-api/` — Supabase backend: migrations, Edge Functions, scripts (Glide import, invite players, seed bundle), tests, docs.
@@ -97,7 +97,7 @@ Implemented in `windex-api/supabase/migrations/`. Atomic-records-only; standings
 
 **Known dev-environment issue (2026-05-14):** all GSD hooks in `~/.claude/settings.json` are registered with PowerShell call-operator syntax (`& "C:/Program Files/nodejs/node.exe" "<hook>.js"`) but Claude Code routes hook commands through `/usr/bin/bash -c`, where leading `&` is a syntax error. Every hook fails to launch — PreToolUse:Write|Edit variants BLOCK the operation (`gsd-prompt-guard`, `gsd-read-guard`, `gsd-workflow-guard`); all others fail silently. Workaround during the 2026-05-14 OTP-invite session: 5 hooks disabled via empty `"hooks": []` arrays, restored from `settings.json.bak` at session end. The hooks remain broken at GSD-source level until upstream patches the registration syntax — see BACKLOG.md entry titled "GSD hooks fail on Windows when Claude Code routes commands through bash" for the full inventory of affected hooks and the suggested fix (drop `& ` prefix, or invoke via `powershell.exe -c`). Any future session that needs Write/Edit will hit the same block; re-apply the same disable workaround.
 
-**All Claude Code prompts drafted in this project must enforce the following sections of `Buzz_Project_Development_Procedure.md` (kept at `C:\Users\buzzs\OneDrive\Desktop\Projects\Buzz_Project_Development_Procedure.md`):**
+**All Claude Code prompts drafted in this project must enforce the following sections of `Buzz_Project_Development_Procedure.md` (kept at `C:\Users\buzzs\Projects\buzz-project-docs\Buzz_Project_Development_Procedure.md`):**
 
 - **3.2a — Working-tree hygiene.** Every Claude Code session ends with a clean `git status`. No "I'll commit this later." Backend deploys (Supabase migrations, Edge Functions) and the corresponding git commits are paired operations.
 - **3.2b — Backend deploys are git operations.** Any `npx supabase db query`, `npx supabase functions deploy`, or `npx vercel env add` must be followed by a git commit of the source in the same session.
