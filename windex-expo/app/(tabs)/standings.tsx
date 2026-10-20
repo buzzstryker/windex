@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,17 +21,24 @@ import { HistoryChart } from '@/components/HistoryChart';
 import { SegmentedToggle } from '@/components/SegmentedToggle';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { UpdatedAgo } from '@/components/UpdatedAgo';
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 import { useDrawer } from '@/contexts/DrawerContext';
 import { useGroup } from '@/contexts/GroupContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { ApiError, type StandingRow } from '@/lib/api';
 import {
-  ApiError,
-  getStandings,
-  listEvents,
-  type StandingRow,
-} from '@/lib/api';
+  ALL_TIME_STALE_MS,
+  fetchAllTime,
+  fetchSeasonStandings,
+  leaderboardKeys,
+  seasonQueryOptions,
+} from '@/lib/leaderboardData';
+import { SESSION_START_MS } from '@/lib/queryClient';
 import { logUserEvent } from '@/lib/userEvents';
+
+const EMPTY_ROWS: StandingRow[] = [];
 
 const OLIVE = '#4B5E2A';
 const ALL_TIME = '__ALL_TIME__';
@@ -78,6 +86,7 @@ export default function StandingsScreen() {
   const router = useRouter();
   const { openDrawer } = useDrawer();
 
+  const { userId } = useAuth();
   const {
     selectedGroup,
     selectedSeason,
@@ -86,9 +95,10 @@ export default function StandingsScreen() {
     seasonLabel,
     loading: groupLoading,
     reload,
-    dataVersion,
     myPlayerIds,
     isSelectedSeasonActive,
+    isSelectedSeasonClosed,
+    defaultSeasonId,
   } = useGroup();
 
   // Log view_leaderboard on initial mount and whenever the selected group
@@ -106,34 +116,57 @@ export default function StandingsScreen() {
     }
   }, [selectedGroup?.id, selectedSeason?.id]);
 
-  const [standings, setStandings] = useState<StandingRow[]>([]);
-  const [loadingStandings, setLoadingStandings] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [seasonPickerVisible, setSeasonPickerVisible] = useState(false);
   const [isAllTime, setIsAllTime] = useState(false);
   const [tab, setTab] = useState<'leaderboard' | 'history'>('leaderboard');
+  const [pulling, setPulling] = useState(false);
 
-  // Distinct rounds-played count for the season-selector pill. Sourced from
-  // listEvents (the SAME source the Rounds tab uses) for the selected
-  // season + group, so the pill count matches the Rounds tab exactly. We count
-  // returned EventSummary items — these are distinct round events and contain
-  // no season_aggregate rows (unlike a raw league_rounds query), so no row_type
-  // filter is needed. null = not yet loaded / N/A (All Time or no season): the
-  // pill shows the bare season label while in this state, never ": 0 Rounds".
-  const [seasonRoundCount, setSeasonRoundCount] = useState<number | null>(null);
+  // One season's standings + match count, from the device cache first, then
+  // get_season_standings (migration 061). The bootstrap seeds the default
+  // season's entry, so app open makes no request here. A closed season is a
+  // frozen snapshot: never stale, never refetched.
+  const groupId = selectedGroup?.id ?? null;
+  const seasonId = selectedSeason?.id ?? null;
+  const seasonQuery = useQuery({
+    queryKey: leaderboardKeys.season(userId ?? '', groupId ?? '', seasonId ?? ''),
+    queryFn: () => fetchSeasonStandings(groupId!, seasonId!),
+    enabled: !!userId && !!groupId && !!seasonId && !isAllTime,
+    ...seasonQueryOptions(isSelectedSeasonClosed),
+  });
 
-  useEffect(() => {
-    if (!selectedGroup || !selectedSeason || isAllTime) {
-      setSeasonRoundCount(null);
-      return;
-    }
-    let cancelled = false;
-    setSeasonRoundCount(null);
-    listEvents({ group_id: selectedGroup.id, season_id: selectedSeason.id })
-      .then((ev) => { if (!cancelled) setSeasonRoundCount(ev.length); })
-      .catch(() => { if (!cancelled) setSeasonRoundCount(null); });
-    return () => { cancelled = true; };
-  }, [selectedGroup?.id, selectedSeason?.id, isAllTime, dataVersion]);
+  // All Time: one get_all_time_standings call (snapshots for closed seasons,
+  // live for open ones) instead of one get-standings per season.
+  const allTimeQuery = useQuery({
+    queryKey: leaderboardKeys.allTime(userId ?? '', groupId ?? ''),
+    queryFn: () => fetchAllTime(groupId!, seasons),
+    enabled: !!userId && !!groupId && isAllTime,
+    staleTime: ALL_TIME_STALE_MS,
+  });
+
+  const activeQuery = isAllTime ? allTimeQuery : seasonQuery;
+  const standings = activeQuery.data?.standings ?? EMPTY_ROWS;
+  // Spinner only when there is nothing cached to show.
+  const loadingStandings = !activeQuery.data && activeQuery.isFetching;
+  const queryError = activeQuery.error;
+  const error = queryError && !activeQuery.data
+    ? (queryError instanceof ApiError ? queryError.message : String(queryError))
+    : null;
+
+  // Matches-played count for the season-selector pill: match_count from the
+  // same payload (the events-list row count for the season, which is what the
+  // Rounds tab lists). null = N/A (All Time / not loaded): the pill shows the
+  // bare season label, never ": 0 Matches".
+  const seasonRoundCount = !isAllTime ? seasonQuery.data?.match_count ?? null : null;
+
+  // "Updated X ago": the current season's rows came from the device cache and
+  // no fetch has succeeded since this session started (an offline reopen, or
+  // the moment before the background revalidation lands).
+  const showUpdatedAgo =
+    !isAllTime &&
+    isSelectedSeasonActive &&
+    !isSelectedSeasonClosed &&
+    !!seasonQuery.data &&
+    seasonQuery.dataUpdatedAt < SESSION_START_MS;
 
   // Sort seasons newest first
   const sortedSeasons = [...seasons].sort((a, b) =>
@@ -155,58 +188,33 @@ export default function StandingsScreen() {
       ? `${currentDisplayLabel}: ${seasonRoundCount} ${seasonRoundCount === 1 ? 'Match' : 'Matches'}`
       : currentDisplayLabel;
 
-  // Fetch standings — single season or all-time aggregate
-  const fetchStandings = useCallback(async () => {
-    if (!selectedGroup) return;
-    setLoadingStandings(true);
-    setError(null);
-    try {
-      if (isAllTime) {
-        const allRows: StandingRow[] = [];
-        for (const s of seasons) {
-          const rows = await getStandings(s.id, selectedGroup.id);
-          allRows.push(...rows);
-        }
-        const merged = new Map<string, StandingRow>();
-        for (const row of allRows) {
-          const existing = merged.get(row.player_id);
-          if (existing) {
-            existing.total_points += row.total_points;
-            existing.rounds_played += row.rounds_played;
-            existing.wins += row.wins;
-            existing.losses += row.losses;
-            existing.ties += row.ties;
-          } else {
-            merged.set(row.player_id, { ...row });
-          }
-        }
-        const sorted = [...merged.values()].sort((a, b) => b.total_points - a.total_points);
-        sorted.forEach((row, i) => { row.rank = i + 1; });
-        setStandings(sorted);
-      } else if (selectedSeason) {
-        const rows = await getStandings(selectedSeason.id, selectedGroup.id);
-        setStandings(rows);
-      } else {
-        setStandings([]);
-      }
-    } catch (e) {
-      setStandings([]);
-      setError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setLoadingStandings(false);
-    }
-  }, [selectedGroup?.id, selectedSeason?.id, isAllTime, seasons, dataVersion]);
-
+  // Tab focus: refetch only what is past its staleTime (30 s for an open
+  // season, 5 min for All Time; a closed season never). Previously every focus
+  // refetched.
+  const { isStale, refetch } = activeQuery;
   useFocusEffect(
     useCallback(() => {
-      fetchStandings();
-    }, [fetchStandings])
+      if (activeQuery.data && isStale) void refetch();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isStale, refetch])
   );
 
+  // Pull-to-refresh: forced bootstrap refetch (which reseeds the default
+  // season), plus the shown season or All Time when the bootstrap doesn't
+  // carry it.
   const refreshData = useCallback(async () => {
-    await reload();
-    fetchStandings();
-  }, [reload, fetchStandings]);
+    setPulling(true);
+    try {
+      const extra = isAllTime
+        ? allTimeQuery.refetch()
+        : seasonId && seasonId !== defaultSeasonId
+          ? seasonQuery.refetch()
+          : Promise.resolve();
+      await Promise.all([reload(), extra]);
+    } finally {
+      setPulling(false);
+    }
+  }, [isAllTime, allTimeQuery, seasonQuery, seasonId, defaultSeasonId, reload]);
 
   const handleSeasonSelect = (seasonId: string) => {
     setSeasonPickerVisible(false);
@@ -335,7 +343,12 @@ export default function StandingsScreen() {
     </View>
   );
 
-  const leaderboardHeader = controlBar;
+  const leaderboardHeader = (
+    <>
+      {controlBar}
+      {showUpdatedAgo ? <UpdatedAgo updatedAt={seasonQuery.dataUpdatedAt} color={muted} /> : null}
+    </>
+  );
 
   return (
     <ThemedView style={styles.screen}>
@@ -375,7 +388,7 @@ export default function StandingsScreen() {
           renderItem={renderRow}
           ListHeaderComponent={leaderboardHeader}
           contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-          refreshing={loadingStandings}
+          refreshing={pulling}
           onRefresh={refreshData}
         />
       ) : (

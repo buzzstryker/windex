@@ -6,6 +6,7 @@ import { setAccessTokenGetter, setOnUnauthorized } from '@/lib/api';
 import { friendlyAuthError } from '@/lib/authErrors';
 import { createTimeoutFetch } from '@/lib/authFetch';
 import { authPersistence } from '@/lib/authPersistence';
+import { clearQueryCache } from '@/lib/queryClient';
 import { setRealtimeAuth } from '@/lib/supabase';
 
 type AuthContextValue = {
@@ -63,8 +64,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        (_event, session) => {
+        (event, session) => {
           if (cancelled) return;
+          // Any sign-out (explicit, 401 auto-sign-out, or a session dropped by
+          // another tab) wipes the leaderboard cache from memory and the device.
+          if (event === 'SIGNED_OUT') void clearQueryCache();
           // Keep the realtime socket's JWT in lockstep with the session.
           // Fires on INITIAL_SESSION / SIGNED_IN / TOKEN_REFRESHED / SIGNED_OUT,
           // so the chat channel never goes deaf after a token refresh.
@@ -140,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // case, that's the place to use scope: 'global'. Surfaced 2026-05-11
     // via migration 022's session-trigger logging.
     if (supabase) await supabase.auth.signOut({ scope: 'local' });
+    await clearQueryCache();
     setSignedIn(false);
     setUserId(null);
   }, [supabase]);

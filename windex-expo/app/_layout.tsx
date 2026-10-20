@@ -11,6 +11,14 @@ import { DrawerProvider, useDrawer } from '@/contexts/DrawerContext';
 import { GroupProvider, useGroup } from '@/contexts/GroupContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { registerServiceWorker } from '@/lib/pwaUpdate';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import {
+  CACHE_SCHEMA_VERSION,
+  CACHED_ROOTS,
+  pruneExpiredQueries,
+  queryClient,
+  queryPersister,
+} from '@/lib/queryClient';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -118,14 +126,32 @@ export default function RootLayout() {
     registerServiceWorker((process.env.EXPO_PUBLIC_BUILD_ID ?? '') || 'dev');
   }, []);
 
+  // The leaderboard cache is restored from device storage before any query
+  // runs, so a cached leaderboard paints before the first network response.
+  // Only successful leaderboard entries are written back; expiry is per entry
+  // (see lib/queryClient.ts), so maxAge is Infinity here.
   return (
-    <AuthProvider>
-      <DrawerProvider>
-        <GroupProvider>
-          <RootNavigator />
-        </GroupProvider>
-      </DrawerProvider>
-    </AuthProvider>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister: queryPersister,
+        maxAge: Infinity,
+        buster: CACHE_SCHEMA_VERSION,
+        dehydrateOptions: {
+          shouldDehydrateQuery: (q) =>
+            q.state.status === 'success' && CACHED_ROOTS.has(String(q.queryKey[0])),
+        },
+      }}
+      onSuccess={pruneExpiredQueries}
+    >
+      <AuthProvider>
+        <DrawerProvider>
+          <GroupProvider>
+            <RootNavigator />
+          </GroupProvider>
+        </DrawerProvider>
+      </AuthProvider>
+    </PersistQueryClientProvider>
   );
 }
 

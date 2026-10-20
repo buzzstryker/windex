@@ -17,8 +17,10 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState } from 'react-native';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useGroup } from '@/contexts/GroupContext';
+import { isPermanentQuery } from '@/lib/queryClient';
 import { getStoredAccessToken } from '@/lib/api';
 import { getAuthorPlayerId } from '@/lib/chatAuthor';
 import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
@@ -112,6 +114,25 @@ export function RoundsUnreadProvider({ children }: { children: ReactNode }) {
     });
     return () => appSub.remove();
   }, [checkUnread]);
+
+  // A new round in a watched group means cached open-season standings, match
+  // counts, All Time and the bootstrap are behind. league_rounds is not in the
+  // realtime publication, so this dot is the only push-like signal we get.
+  // Closed-season snapshots are untouched.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!hasUnreadRounds || !watchedGroupIdsKey) return;
+    const watched = new Set(watchedGroupIdsKey.split(','));
+    void queryClient.invalidateQueries({
+      predicate: (q) => {
+        const [root, , gid] = q.queryKey as [string, string, string | null];
+        if (root === 'bootstrap') return true;
+        if (root === 'season') return !!gid && watched.has(gid) && !isPermanentQuery(q);
+        if (root === 'allTime') return !!gid && watched.has(gid);
+        return false;
+      },
+    });
+  }, [hasUnreadRounds, watchedGroupIdsKey, queryClient]);
 
   return (
     <RoundsUnreadContext.Provider value={{ hasUnreadRounds, markRoundsSeen }}>

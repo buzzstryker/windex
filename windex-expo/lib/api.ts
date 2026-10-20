@@ -85,6 +85,11 @@ export type Season = {
   cup_champion_player_id?: string | null;
   /** Optional free-text note explaining how the champion was decided (migration 025). */
   cup_champion_notes?: string | null;
+  /** UI-only playoff-era flag (migration 050). Present on bootstrap seasons. */
+  playoff_format?: boolean;
+  /** Set when the season's standings are frozen into season_standings_final
+   *  (migration 058). Absent on a pre-058 /seasons response — treat as open. */
+  closed_at?: string | null;
 };
 
 export async function listGroups(): Promise<Group[]> {
@@ -375,6 +380,133 @@ export async function getStandings(seasonId: string, groupId?: string): Promise<
   const data = await apiFetch<{ standings?: StandingRow[] }>(`/get-standings?${params}`);
   const list = data.standings ?? [];
   return list.map((row, i) => ({ ...row, rank: i + 1 }));
+}
+
+/* --- Leaderboard RPCs (migration 061) --- */
+
+/**
+ * POST a PostgREST RPC as the signed-in user. Errors carry PostgREST's
+ * `message` (the RAISE text) and the HTTP status, like apiFetch; a 401 also
+ * fires the unauthorized callback so an expired session signs out the same way.
+ */
+export async function rpcFetch<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
+  const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
+  if (!base) {
+    throw new ApiError(0, 'Set EXPO_PUBLIC_LATE_ADD_API_URL or EXPO_PUBLIC_SUPABASE_URL in .env');
+  }
+  const token = await getAccessToken();
+  if (!token) throw new ApiError(401, 'Sign in first');
+  const anonKey = getSupabaseAnonKey();
+  const path = `/rest/v1/rpc/${fn}`;
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey || token,
+    },
+    body: JSON.stringify(args),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text;
+    try {
+      const j = JSON.parse(text) as { message?: string };
+      if (j?.message) msg = j.message;
+    } catch {
+      /* keep text */
+    }
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    throw new ApiError(res.status, msg, path);
+  }
+  return JSON.parse(text) as T;
+}
+
+/** A standings row as the RPCs return it: StandingRow minus season_id/group_id. */
+type RpcStandingRow = Omit<StandingRow, 'season_id' | 'group_id'>;
+
+/** get_season_standings: one season, from the frozen snapshot when closed. */
+export type SeasonStandingsPayload = {
+  season_id: string;
+  group_id: string;
+  closed_at: string | null;
+  source: 'live' | 'final';
+  match_count: number;
+  standings: StandingRow[];
+  as_of: string;
+};
+
+export type BootstrapMe = {
+  user_id: string;
+  player_ids: string[];
+  display_name: string | null;
+  email: string | null;
+  is_heckler: boolean;
+  is_super_admin: boolean;
+  memberships: { group_id: string; joined_at: string; is_admin: boolean }[];
+};
+
+export type BootstrapGroup = Group & { section_name: string | null };
+
+/** get_leaderboard_bootstrap: everything app open needs, in one call. */
+export type LeaderboardBootstrap = {
+  me: BootstrapMe;
+  groups: BootstrapGroup[];
+  selected_group_id: string | null;
+  seasons: Season[];
+  selected_season_id: string | null;
+  selected_season: SeasonStandingsPayload | null;
+  as_of: string;
+};
+
+export type AllTimeStandings = {
+  group_id: string;
+  closed_seasons: string[];
+  open_seasons: string[];
+  standings: (StandingRow & { seasons_played?: number })[];
+  as_of: string;
+};
+
+type RawSeasonStandings = Omit<SeasonStandingsPayload, 'standings'> & { standings: RpcStandingRow[] };
+
+/** RPC rows omit season_id/group_id; StandingRow consumers expect them. */
+function withSeasonKeys(p: RawSeasonStandings): SeasonStandingsPayload {
+  return {
+    ...p,
+    standings: p.standings.map((r) => ({ ...r, season_id: p.season_id, group_id: p.group_id })),
+  };
+}
+
+export async function getSeasonStandings(groupId: string, seasonId: string): Promise<SeasonStandingsPayload> {
+  const raw = await rpcFetch<RawSeasonStandings>('get_season_standings', {
+    p_group_id: groupId,
+    p_season_id: seasonId,
+  });
+  return withSeasonKeys(raw);
+}
+
+export async function getLeaderboardBootstrap(groupId: string | null): Promise<LeaderboardBootstrap> {
+  const raw = await rpcFetch<Omit<LeaderboardBootstrap, 'selected_season'> & { selected_season: RawSeasonStandings | null }>(
+    'get_leaderboard_bootstrap',
+    { p_group_id: groupId },
+  );
+  return {
+    ...raw,
+    groups: raw.groups.map((g) => ({ ...g, group_type: g.group_type ?? 'league' })),
+    selected_season: raw.selected_season ? withSeasonKeys(raw.selected_season) : null,
+  };
+}
+
+export async function getAllTimeStandings(groupId: string): Promise<AllTimeStandings> {
+  const raw = await rpcFetch<Omit<AllTimeStandings, 'standings'> & { standings: (RpcStandingRow & { seasons_played?: number })[] }>(
+    'get_all_time_standings',
+    { p_group_id: groupId },
+  );
+  return {
+    ...raw,
+    // season_id is meaningless across seasons; kept '' so the row satisfies StandingRow.
+    standings: raw.standings.map((r) => ({ ...r, season_id: '', group_id: raw.group_id })),
+  };
 }
 
 export type EventSummary = {

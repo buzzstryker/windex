@@ -1,16 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  listGroups,
-  listSections,
-  listSeasons,
-  getStoredAccessToken,
   seasonLabel as getSeasonLabel,
   type Group,
   type Season,
   type Section,
+  type SeasonStandingsPayload,
 } from '@/lib/api';
-import { getApiBase, getSupabaseAnonKey } from '@/lib/config';
 import { useAuth } from '@/contexts/AuthContext';
+import { BOOTSTRAP_STALE_MS, fetchBootstrap, leaderboardKeys } from '@/lib/leaderboardData';
+import { isPermanentQuery } from '@/lib/queryClient';
 import { selectedGroupKey, userPrefs } from '@/lib/userPrefs';
 import { logUserEvent } from '@/lib/userEvents';
 
@@ -40,14 +39,14 @@ type GroupContextValue = {
   selectSeason: (season: Season) => void;
   loading: boolean;
   seasonLabel: (s: Season) => string;
+  /** Forced refetch of the bootstrap (pull-to-refresh). */
   reload: () => Promise<void>;
   isSuperAdmin: boolean;
   isGroupAdmin: (groupId: string) => boolean;
   myPlayerIds: string[];
   /** True when any players row linked to this auth user has is_heckler
    *  (migration 055) — a global spectator. Mirrors the am_i_heckler() SQL
-   *  helper, but resolved client-side from the same request that produces
-   *  myPlayerIds rather than costing a second round trip. */
+   *  helper, resolved from the same bootstrap that produces myPlayerIds. */
   amHeckler: boolean;
   /** display_name / email of the signed-in user's earliest-created players row
    *  — the same row getAuthorPlayerId() picks for chat authorship, so the
@@ -58,188 +57,45 @@ type GroupContextValue = {
   dataVersion: number;
   invalidateData: () => void;
   isSelectedSeasonActive: boolean;
+  /** Selected season's standings are a frozen snapshot (seasons.closed_at, migration 058). */
+  isSelectedSeasonClosed: boolean;
+  /** The season the bootstrap picked and already fetched (in progress today, else latest started). */
+  defaultSeasonId: string | null;
 };
 
 const GroupContext = createContext<GroupContextValue | null>(null);
 
+const EMPTY_GROUPS: GroupWithSection[] = [];
+const EMPTY_SEASONS: Season[] = [];
+const EMPTY_IDS: string[] = [];
+
+/**
+ * App-open data comes from ONE call, get_leaderboard_bootstrap (migration 061),
+ * cached on the device by TanStack Query (lib/queryClient.ts): a cached
+ * bootstrap renders at once and revalidates in the background. It replaces the
+ * chain this context used to run — am_i_super_admin -> players -> group_members,
+ * in parallel with groups + sections, then seasons — and seeds the selected
+ * season's standings into its own cache entry, so the Standings tab renders
+ * without a second request.
+ *
+ * Group resolution (requested pick -> most-recently-joined league -> first
+ * league by name) now happens in the RPC; this context only supplies the
+ * persisted pick from userPrefs, which is local and read first.
+ */
 export function GroupProvider({ children }: { children: React.ReactNode }) {
   const { signedIn, ready, userId } = useAuth();
-  const [groups, setGroups] = useState<GroupWithSection[]>([]);
-  const [rosterGroups, setRosterGroups] = useState<GroupWithSection[]>([]);
-  const [sections, setSections] = useState<Section[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<GroupWithSection | null>(null);
-  const [seasons, setSeasons] = useState<Season[]>([]);
-  const [selectedSeason, setSelectedSeason] = useState<Season | null>(null);
-  // Loading state for the *groups list* fetch. Combined with the resolution
-  // flags below to expose a single `loading` value to consumers — true until
-  // the picker can render correctly.
-  const [groupsLoading, setGroupsLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  // group_id → group_members.joined_at (ISO timestamp). Drives myGroups order
-  // and the default-group resolution. Single source of truth — the prior
-  // version had a duplicate inline query inside loadGroups, which could
-  // disagree with this state and resolve the default to the wrong group.
-  const [myMembershipJoinedAt, setMyMembershipJoinedAt] = useState<Map<string, string>>(new Map());
-  // True once the membership query has completed for the current user (or
-  // returned empty for a no-membership user). Required for the default-group
-  // resolution effect: empty-Map could mean "still loading" or "no
-  // memberships" without this flag.
-  const [myMembershipsLoaded, setMyMembershipsLoaded] = useState(false);
-
-  // Persisted manual selection per user_id. Loaded asynchronously from
-  // userPrefs when userId changes. The default-resolution effect waits on
-  // persistedChoiceLoaded so a stored pick wins over auto-selection.
+  // Persisted manual selection per user_id. Loaded before the bootstrap query
+  // is enabled so the stored pick is sent as p_group_id.
   const [persistedChoiceId, setPersistedChoiceId] = useState<string | null>(null);
   const [persistedChoiceLoaded, setPersistedChoiceLoaded] = useState(false);
 
-  // Permissions
+  // A season picked in the season picker. null = the bootstrap's default.
+  const [seasonOverrideId, setSeasonOverrideId] = useState<string | null>(null);
+
   const [dataVersion, setDataVersion] = useState(0);
-  const invalidateData = useCallback(() => setDataVersion((v) => v + 1), []);
 
-  // Is the selected season currently active (end_date >= today)?
-  const today = new Date().toISOString().slice(0, 10);
-  const isSelectedSeasonActive = selectedSeason ? selectedSeason.end_date >= today : false;
-
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [adminGroupIds, setAdminGroupIds] = useState<Set<string>>(new Set());
-  const [myPlayerIds, setMyPlayerIds] = useState<string[]>([]);
-  const [amHeckler, setAmHeckler] = useState(false);
-  const [myDisplayName, setMyDisplayName] = useState<string | null>(null);
-  const [myEmail, setMyEmail] = useState<string | null>(null);
-
-  const isGroupAdmin = useCallback((groupId: string) => adminGroupIds.has(groupId), [adminGroupIds]);
-
-  // Groups the user is an active member of, ordered by group_members.joined_at
-  // DESC (most-recently-joined first) with name as a stable tie-break. The
-  // picker, the drawer's "My Groups" section, and the default-group resolver
-  // all read from this list — newest membership first matches the new-invitee
-  // expectation: a player added to a group lands on that group on next
-  // sign-in.
-  const myGroups = useMemo(() => {
-    const filtered = groups.filter((g) => myMembershipJoinedAt.has(g.id));
-    return [...filtered].sort((a, b) => {
-      const ja = myMembershipJoinedAt.get(a.id) ?? '';
-      const jb = myMembershipJoinedAt.get(b.id) ?? '';
-      const cmp = jb.localeCompare(ja); // DESC: later ISO sorts first
-      return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
-    });
-  }, [groups, myMembershipJoinedAt]);
-
-  // ─── Permissions + memberships ────────────────────────────────────────────
-  // Loads super-admin status, my player IDs, and my group memberships
-  // (joined_at + role). Sets myMembershipsLoaded=true at the end so the
-  // default-resolution effect knows it's safe to pick.
-  useEffect(() => {
-    if (!ready || !signedIn) {
-      setIsSuperAdmin(false);
-      setAdminGroupIds(new Set());
-      setMyPlayerIds([]);
-      setAmHeckler(false);
-      setMyDisplayName(null);
-      setMyEmail(null);
-      setMyMembershipJoinedAt(new Map());
-      setMyMembershipsLoaded(false);
-      return;
-    }
-    let cancelled = false;
-    setMyMembershipsLoaded(false);
-    (async () => {
-      const base = getApiBase().replace(/\/functions\/v1\/?$/, '');
-      const token = await getStoredAccessToken();
-      const anonKey = getSupabaseAnonKey();
-      if (!base || !token) {
-        if (!cancelled) setMyMembershipsLoaded(true);
-        return;
-      }
-      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: anonKey || token };
-      try {
-        // Super admin
-        const saRes = await fetch(`${base}/rest/v1/rpc/am_i_super_admin`, { method: 'POST', headers, body: '{}' });
-        if (!cancelled && saRes.ok) {
-          const val = await saRes.json();
-          setIsSuperAdmin(val === true);
-        }
-
-        // My player rows. This replaces the get_my_player_ids RPC with the
-        // equivalent PostgREST select (players_select is USING(true), and the
-        // RPC's body is literally `SELECT id FROM players WHERE user_id =
-        // auth.uid()`), so it returns is_heckler in the SAME request rather
-        // than costing a second round trip for the badge flag.
-        // userId comes from AuthContext and is set by the same listener that
-        // sets signedIn; the guard below keeps the old behaviour if it ever
-        // lags, since myPlayerIds gates every write affordance in the app.
-        if (!userId) {
-          if (!cancelled) setMyMembershipsLoaded(true);
-          return;
-        }
-        const pidRes = await fetch(
-          `${base}/rest/v1/players?user_id=eq.${encodeURIComponent(userId)}` +
-            `&select=id,is_heckler,display_name,email&order=created_at.asc`,
-          { headers }
-        );
-        if (!pidRes.ok) {
-          if (!cancelled) setMyMembershipsLoaded(true);
-          return;
-        }
-        const playerRows: {
-          id: string;
-          is_heckler: boolean | null;
-          display_name: string | null;
-          email: string | null;
-        }[] = await pidRes.json();
-        if (cancelled) return;
-        const ids = playerRows.map((r) => r.id);
-        setMyPlayerIds(ids);
-        // Any one linked row carrying the flag makes the user a Heckler —
-        // same semantics as the am_i_heckler() SQL helper's EXISTS.
-        setAmHeckler(playerRows.some((r) => r.is_heckler === true));
-        // [0] is the earliest-created row thanks to order=created_at.asc —
-        // the same one getAuthorPlayerId() posts chat messages as.
-        setMyDisplayName(playerRows[0]?.display_name ?? null);
-        setMyEmail(playerRows[0]?.email ?? null);
-
-        if (ids.length === 0) {
-          // No player records linked to this auth user. Mark loaded so the
-          // resolution effect can fall through to the no-membership branch.
-          setMyMembershipJoinedAt(new Map());
-          setAdminGroupIds(new Set());
-          setMyMembershipsLoaded(true);
-          return;
-        }
-
-        const inList = ids.map((id) => `"${id}"`).join(',');
-        const gmRes = await fetch(
-          `${base}/rest/v1/group_members?player_id=in.(${inList})&is_active=eq.1&select=group_id,role,joined_at`,
-          { headers: { Authorization: `Bearer ${token}`, apikey: anonKey || token } }
-        );
-        if (!gmRes.ok) {
-          if (!cancelled) setMyMembershipsLoaded(true);
-          return;
-        }
-        const rows: { group_id: string; role: string; joined_at: string }[] = await gmRes.json();
-        if (cancelled) return;
-        // Defensive: if a user has multiple players in the same group_id, keep
-        // the EARLIEST joined_at (so myGroups orders by first-touch when a
-        // player has duplicate-membership rows). The MOST-recent direction is
-        // applied at sort time — see myGroups useMemo above.
-        const joinedAt = new Map<string, string>();
-        for (const r of rows) {
-          const prev = joinedAt.get(r.group_id);
-          if (!prev || r.joined_at.localeCompare(prev) < 0) joinedAt.set(r.group_id, r.joined_at);
-        }
-        setMyMembershipJoinedAt(joinedAt);
-        setAdminGroupIds(new Set(rows.filter((r) => r.role === 'admin').map((r) => r.group_id)));
-        setMyMembershipsLoaded(true);
-      } catch {
-        if (!cancelled) setMyMembershipsLoaded(true); // unblock on errors
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [ready, signedIn, userId]);
-
-  // ─── Persisted choice loader ──────────────────────────────────────────────
-  // userPrefs is async; load the persisted selectedGroupId for the current
-  // user_id and store in state. Default-resolution waits on this.
   useEffect(() => {
     if (!userId) {
       setPersistedChoiceId(null);
@@ -262,190 +118,177 @@ export function GroupProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // ─── Groups + sections list ──────────────────────────────────────────────
-  // Just fetches the lists. Default-group resolution moved out of here into
-  // the dedicated effect below — that effect waits on memberships and
-  // persisted-choice before picking, which avoids the wrong-group flash that
-  // existed when this function did its own inline membership query.
-  const loadGroups = useCallback(async () => {
-    setGroupsLoading(true);
-    try {
-      const [g, s] = await Promise.all([listGroups(), listSections()]);
-      const sectionMap = new Map(s.map((sec) => [sec.id, sec.name]));
-      const enriched: GroupWithSection[] = g.map((grp) => ({
-        ...grp,
-        sectionName: grp.section_id ? sectionMap.get(grp.section_id) ?? undefined : undefined,
-      }));
-      // Split by type: `groups` carries LEAGUES only (the player-visible
-      // universe — this is the single filter point that keeps rosters out of
-      // the switcher, drawer, default resolution, and myGroups). Rosters go to
-      // `rosterGroups` for the super-admin browse picker. Migration 052.
-      setGroups(enriched.filter((grp) => grp.group_type !== 'roster'));
-      setRosterGroups(enriched.filter((grp) => grp.group_type === 'roster'));
-      setSections(s);
-    } catch {
-      // silent
-    } finally {
-      setGroupsLoading(false);
-    }
-  }, []);
+  const bootstrapEnabled = ready && signedIn && !!userId && persistedChoiceLoaded;
+  const bootstrapKey = leaderboardKeys.bootstrap(userId ?? '', persistedChoiceId);
+  const bootstrap = useQuery({
+    queryKey: bootstrapKey,
+    queryFn: () => fetchBootstrap(userId!, persistedChoiceId),
+    enabled: bootstrapEnabled,
+    staleTime: BOOTSTRAP_STALE_MS,
+  });
+  const data = bootstrap.data;
 
-  // ─── Sign-in / sign-out trigger for loadGroups ───────────────────────────
+  // Seed the selected season's cache entry from the bootstrap, and drop any
+  // cached season whose open/closed state the server now reports differently
+  // (an admin closed or reopened it) so a stale snapshot is never served.
   useEffect(() => {
-    if (ready && signedIn) {
-      loadGroups();
-    } else if (ready && !signedIn) {
-      setGroups([]);
-      setRosterGroups([]);
-      setSections([]);
-      setSelectedGroup(null);
-      setSeasons([]);
-      setSelectedSeason(null);
-      setGroupsLoading(false);
+    if (!data || !userId || !data.selected_group_id) return;
+    const gid = data.selected_group_id;
+    for (const s of data.seasons) {
+      const key = leaderboardKeys.season(userId, gid, s.id);
+      const cached = queryClient.getQueryData<SeasonStandingsPayload>(key);
+      if (cached && (cached.closed_at ?? null) !== (s.closed_at ?? null)) {
+        queryClient.removeQueries({ queryKey: key, exact: true });
+      }
     }
-  }, [ready, signedIn, loadGroups]);
-
-  // ─── Default-group resolution ────────────────────────────────────────────
-  // Runs once everything needed is ready. Resolution chain:
-  //   1. Persisted manual selection (if still a valid member, or if the user
-  //      has no memberships at all).
-  //   2. Most-recently-joined of myGroups (myGroups is sorted DESC, so [0]).
-  //   3. Alphabetical-first overall — fallback for the no-membership case
-  //      (super admin / brand-new user with no group_members rows). We
-  //      can't read joined_at for groups the user isn't in, so alphabetical
-  //      is the only sensible tiebreak here.
-  useEffect(() => {
-    if (!ready || !signedIn) return;
-    if (selectedGroup) return; // already chosen
-    if (groupsLoading) return; // groups list still loading
-    if (!myMembershipsLoaded) return; // memberships still loading
-    if (!persistedChoiceLoaded) return; // persisted choice still loading
-    if (groups.length === 0) return; // nothing to pick
-
-    let chosen: GroupWithSection | undefined;
-
-    // 1. Persisted manual selection — validated against ALL groups, not just
-    //    memberships. Viewing any group is now permitted, so a non-member's
-    //    saved pick (e.g. Chris → YC Windex) must survive reload rather than
-    //    being discarded back to a membership.
-    if (persistedChoiceId) {
-      const candidate = groups.find((g) => g.id === persistedChoiceId);
-      if (candidate) chosen = candidate;
+    if (data.selected_season) {
+      const key = leaderboardKeys.season(userId, gid, data.selected_season.season_id);
+      const cachedAt = queryClient.getQueryState(key)?.dataUpdatedAt ?? 0;
+      if (bootstrap.dataUpdatedAt >= cachedAt) {
+        queryClient.setQueryData(key, data.selected_season, { updatedAt: bootstrap.dataUpdatedAt });
+      }
     }
+  }, [data, bootstrap.dataUpdatedAt, userId, queryClient]);
 
-    // 2. Most-recently-joined of myGroups
-    if (!chosen) chosen = myGroups[0];
-
-    // 3. Alphabetical-first overall
-    if (!chosen) {
-      chosen = [...groups].sort((a, b) => a.name.localeCompare(b.name))[0];
+  const allGroups: GroupWithSection[] = useMemo(
+    () => (data?.groups ?? []).map((g) => ({ ...g, sectionName: g.section_name ?? undefined })),
+    [data],
+  );
+  // Split by type: `groups` carries LEAGUES only (the single filter point that
+  // keeps rosters out of the switcher, drawer, default resolution, and
+  // myGroups). Rosters go to `rosterGroups` for the super-admin browse picker.
+  const groups = useMemo(() => allGroups.filter((g) => g.group_type !== 'roster'), [allGroups]);
+  const rosterGroups = useMemo(() => allGroups.filter((g) => g.group_type === 'roster'), [allGroups]);
+  const sections: Section[] = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const g of data?.groups ?? []) {
+      if (g.section_id && g.section_name) seen.set(g.section_id, g.section_name);
     }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [data]);
 
-    if (chosen) setSelectedGroup(chosen);
-  }, [
-    ready, signedIn,
-    selectedGroup,
-    groupsLoading, myMembershipsLoaded, persistedChoiceLoaded,
-    groups, myGroups, myMembershipJoinedAt,
-    persistedChoiceId,
-  ]);
+  const me = data?.me;
+  const myMembershipJoinedAt = useMemo(
+    () => new Map((me?.memberships ?? []).map((m) => [m.group_id, m.joined_at])),
+    [me],
+  );
+  const adminGroupIds = useMemo(
+    () => new Set((me?.memberships ?? []).filter((m) => m.is_admin).map((m) => m.group_id)),
+    [me],
+  );
+  const isGroupAdmin = useCallback((groupId: string) => adminGroupIds.has(groupId), [adminGroupIds]);
 
-  // ─── Seasons (loaded when group changes) ──────────────────────────────────
-  useEffect(() => {
-    if (!selectedGroup) {
-      setSeasons([]);
-      setSelectedSeason(null);
-      return;
-    }
-    let cancelled = false;
-    listSeasons(selectedGroup.id)
-      .then((s) => {
-        if (cancelled) return;
-        setSeasons(s);
-        const today = new Date().toISOString().slice(0, 10);
-        const current = s.find((sn) => sn.end_date >= today && sn.start_date <= today);
-        if (current) {
-          setSelectedSeason(current);
-        } else {
-          const sorted = [...s].sort((a, b) => b.start_date.localeCompare(a.start_date));
-          setSelectedSeason(sorted[0] ?? null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSeasons([]);
-          setSelectedSeason(null);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [selectedGroup?.id]);
+  // Groups the user is an active member of, ordered by group_members.joined_at
+  // DESC (most-recently-joined first) with name as a stable tie-break.
+  const myGroups = useMemo(() => {
+    const filtered = groups.filter((g) => myMembershipJoinedAt.has(g.id));
+    return [...filtered].sort((a, b) => {
+      const ja = myMembershipJoinedAt.get(a.id) ?? '';
+      const jb = myMembershipJoinedAt.get(b.id) ?? '';
+      const cmp = jb.localeCompare(ja);
+      return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+    });
+  }, [groups, myMembershipJoinedAt]);
+
+  const selectedGroup = useMemo(
+    () => groups.find((g) => g.id === data?.selected_group_id) ?? null,
+    [groups, data?.selected_group_id],
+  );
+  const seasons = data?.seasons ?? EMPTY_SEASONS;
+  const selectedSeason = useMemo(() => {
+    const wanted = seasonOverrideId ?? data?.selected_season_id ?? null;
+    return seasons.find((s) => s.id === wanted) ?? null;
+  }, [seasons, seasonOverrideId, data?.selected_season_id]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const isSelectedSeasonActive = selectedSeason ? selectedSeason.end_date >= today : false;
+  const isSelectedSeasonClosed = !!selectedSeason?.closed_at;
 
   const selectGroup = useCallback((group: GroupWithSection) => {
-    // Capture the previous selection BEFORE the state update so the
-    // group_switch event has accurate from_group_id. The initial default-
-    // selection effect uses setSelectedGroup directly (not selectGroup), so
-    // this path is by construction user-initiated — but we still guard on
-    // prev existing + being a different id to avoid logging redundant
-    // "switches" if a UI ever re-selects the current group.
     const prev = selectedGroup;
-    setSelectedGroup(group);
-    setSelectedSeason(null); // resolved by the seasons effect
-    if (userId) {
-      void userPrefs.setItem(selectedGroupKey(userId), group.id);
-      setPersistedChoiceId(group.id);
+    if (prev && prev.id !== group.id && userId) {
+      // Group switch: the previous group's open-season, All Time and bootstrap
+      // entries go; its closed-season snapshots stay (immutable, never expire).
+      queryClient.removeQueries({
+        predicate: (q) => {
+          const [root, uid, gid] = q.queryKey as [string, string, string | null];
+          if (uid !== userId) return false;
+          if (root === 'season') return gid === prev.id && !isPermanentQuery(q);
+          if (root === 'allTime') return gid === prev.id;
+          if (root === 'bootstrap') return gid === prev.id || gid === null;
+          return false;
+        },
+      });
     }
+    setSeasonOverrideId(null); // the new group's default season
+    setPersistedChoiceId(group.id);
+    if (userId) void userPrefs.setItem(selectedGroupKey(userId), group.id);
+    // Capture-before-update semantics as before: only a user-initiated switch
+    // to a different group logs group_switch.
     if (prev && prev.id !== group.id) {
       void logUserEvent('group_switch', {
         groupId: group.id,
-        playerId: myPlayerIds[0] ?? null,
+        playerId: me?.player_ids[0] ?? null,
         metadata: { from_group_id: prev.id },
       });
     }
-  }, [userId, selectedGroup, myPlayerIds]);
+  }, [selectedGroup, userId, queryClient, me]);
 
   const selectSeason = useCallback((season: Season) => {
-    setSelectedSeason(season);
+    setSeasonOverrideId(season.id);
   }, []);
 
-  // Is the current user an active member of the selected group? Mirrors the
-  // am_i_group_member(group_id) predicate that gates league_rounds/
-  // league_scores INSERT RLS. Drives write-affordance visibility in consumers.
+  const reload = useCallback(async () => {
+    await bootstrap.refetch();
+  }, [bootstrap]);
+
+  // A round was saved in-app: the current season's standings, All Time and the
+  // bootstrap are out of date. dataVersion still bumps for screens that key
+  // effects on it (Rounds tab).
+  const invalidateData = useCallback(() => {
+    setDataVersion((v) => v + 1);
+    if (!userId) return;
+    const gid = selectedGroup?.id;
+    if (gid && selectedSeason) {
+      void queryClient.invalidateQueries({ queryKey: leaderboardKeys.season(userId, gid, selectedSeason.id) });
+    }
+    if (gid) void queryClient.invalidateQueries({ queryKey: leaderboardKeys.allTime(userId, gid) });
+    void queryClient.invalidateQueries({ queryKey: bootstrapKey });
+  }, [userId, selectedGroup?.id, selectedSeason, queryClient, bootstrapKey]);
+
   const selectedGroupIsMine = selectedGroup ? myMembershipJoinedAt.has(selectedGroup.id) : false;
 
-  // Combined loading state for consumers. True until everything that affects
-  // which group should be shown is settled. Components show a spinner instead
-  // of rendering with a wrong-group flash followed by correction.
-  const loading =
-    groupsLoading ||
-    !myMembershipsLoaded ||
-    !persistedChoiceLoaded ||
-    (signedIn && groups.length > 0 && !selectedGroup);
+  // True until the picker can render correctly: no cached or fetched bootstrap
+  // yet. A cached bootstrap clears this at once, before the revalidation lands.
+  const loading = !ready || (signedIn && (!persistedChoiceLoaded || (!data && !bootstrap.isError)));
 
   return (
     <GroupContext.Provider
       value={{
-        groups,
-        rosterGroups,
-        myGroups,
-        sections,
-        selectedGroup,
+        groups: signedIn ? groups : EMPTY_GROUPS,
+        rosterGroups: signedIn ? rosterGroups : EMPTY_GROUPS,
+        myGroups: signedIn ? myGroups : EMPTY_GROUPS,
+        sections: signedIn ? sections : [],
+        selectedGroup: signedIn ? selectedGroup : null,
         selectedGroupIsMine,
-        selectedSeason,
-        seasons,
+        selectedSeason: signedIn ? selectedSeason : null,
+        seasons: signedIn ? seasons : EMPTY_SEASONS,
         selectGroup,
         selectSeason,
         loading,
         seasonLabel: getSeasonLabel,
-        reload: loadGroups,
-        isSuperAdmin,
+        reload,
+        isSuperAdmin: signedIn && !!me?.is_super_admin,
         isGroupAdmin,
-        myPlayerIds,
-        amHeckler,
-        myDisplayName,
-        myEmail,
+        myPlayerIds: signedIn ? me?.player_ids ?? EMPTY_IDS : EMPTY_IDS,
+        amHeckler: signedIn && !!me?.is_heckler,
+        myDisplayName: signedIn ? me?.display_name ?? null : null,
+        myEmail: signedIn ? me?.email ?? null : null,
         dataVersion,
         invalidateData,
         isSelectedSeasonActive,
+        isSelectedSeasonClosed,
+        defaultSeasonId: data?.selected_season_id ?? null,
       }}
     >
       {children}
